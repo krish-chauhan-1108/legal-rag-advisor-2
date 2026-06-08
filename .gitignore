@@ -1,0 +1,25 @@
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+
+# Data and Vector Store
+data/
+chroma_db/
+vector_db/
+
+# OS Files
+.DS_Store
+Thumbs.db
