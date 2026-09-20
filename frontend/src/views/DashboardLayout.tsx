@@ -3,7 +3,9 @@ import { Outlet, useNavigate } from 'react-router-dom';
 import { Scale, Database, Plus } from 'lucide-react';
 import { SystemStatus } from '../components/Sidebar/SystemStatus';
 
-const API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
+const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
 type ApiStatus = 'checking' | 'online' | 'offline';
 
 export const DashboardLayout: React.FC = () => {

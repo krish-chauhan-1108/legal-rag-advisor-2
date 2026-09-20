@@ -4,7 +4,9 @@ import { Send, Paperclip, FileText, X, Scale } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
 import type { ChatMessage } from '../types';
 
-const API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
+const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
 
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
 
