@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Database, UploadCloud, File, Trash2, Loader2, CheckCircle2 } from 'lucide-react';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 interface DocumentInfo {
   document_name: string;
   chunk_count: number;
 }
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export const KnowledgeBaseView: React.FC = () => {
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
@@ -17,31 +17,19 @@ export const KnowledgeBaseView: React.FC = () => {
     fetch(`${API_URL}/api/documents`)
     .then(r => r.ok ? r.json() : { documents: [] })
     .then(data => setDocuments(data.documents || []))
-    .catch(e => {
-      console.error(e);
-      setError("Cannot connect to the server to fetch documents.");
-    });
+    .catch(e => console.error(e));
   };
 
   useEffect(() => {
     fetchDocuments();
   }, []);
 
-  const extractErrorMsg = (detail: any, defaultMsg: string) => {
-    if (!detail) return defaultMsg;
-    if (typeof detail === 'string') return detail;
-    if (Array.isArray(detail)) return detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ');
-    return JSON.stringify(detail);
-  };
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
 
     const formData = new FormData();
-    for (let i = 0; i < files.length; i++) {
-      formData.append('files', files[i]);
-    }
+    formData.append('file', file);
     
     setIsUploading(true);
     setError(null);
@@ -55,11 +43,11 @@ export const KnowledgeBaseView: React.FC = () => {
       if (res.ok) {
         fetchDocuments();
       } else {
-        const data = await res.json().catch(() => ({}));
-        setError(extractErrorMsg(data.detail, "Upload failed due to a server error."));
+        const data = await res.json();
+        setError(data.detail || "Upload failed");
       }
-    } catch (err) {
-      setError("Network error: Cannot connect to the server during upload.");
+    } catch {
+      setError("Network error during upload");
     } finally {
       setIsUploading(false);
       e.target.value = ''; // reset input
@@ -75,13 +63,9 @@ export const KnowledgeBaseView: React.FC = () => {
       });
       if (res.ok) {
         fetchDocuments();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(extractErrorMsg(data.detail, "Deletion failed due to a server error."));
       }
     } catch (e) {
       console.error(e);
-      setError("Network error: Cannot connect to the server to delete document.");
     }
   };
 
@@ -94,7 +78,7 @@ export const KnowledgeBaseView: React.FC = () => {
       <div className="p-8 max-w-4xl mx-auto w-full space-y-8">
         
         {/* Upload Section */}
-        <div className="bg-[#F9F9F8] border border-gray-200 rounded-3xl p-8 text-center">
+        <div className="bg-[#F9F9F8] border border-gray-200 rounded-xl p-8 text-center">
           <UploadCloud className="w-12 h-12 text-[#1E293B] mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">Upload Legal Documents</h3>
           <p className="text-sm text-gray-500 mb-6">
@@ -103,7 +87,7 @@ export const KnowledgeBaseView: React.FC = () => {
           
           {error && <div className="mb-4 text-red-500 text-sm">{error}</div>}
           
-          <label className="relative inline-flex items-center gap-2 bg-[#1E293B] text-white px-6 py-3 rounded-full hover:bg-[#0F172A] cursor-pointer transition-colors font-medium text-sm overflow-hidden">
+          <label className="relative inline-flex items-center gap-2 bg-[#1E293B] text-white px-6 py-3 rounded-lg hover:bg-[#0F172A] cursor-pointer transition-colors font-medium text-sm overflow-hidden">
             {isUploading ? (
               <><Loader2 className="w-4 h-4 animate-spin" /> Ingesting Document...</>
             ) : (
@@ -112,7 +96,6 @@ export const KnowledgeBaseView: React.FC = () => {
             <input 
               type="file" 
               accept=".pdf" 
-              multiple
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               onChange={handleFileUpload}
               disabled={isUploading}
@@ -128,15 +111,15 @@ export const KnowledgeBaseView: React.FC = () => {
           </h3>
           
           {documents.length === 0 ? (
-            <div className="text-center py-12 text-gray-400 border border-dashed border-gray-200 rounded-2xl">
+            <div className="text-center py-12 text-gray-400 border border-dashed border-gray-200 rounded-xl">
               <p className="text-sm">No documents in your knowledge base yet.</p>
             </div>
           ) : (
-            <div className="border border-gray-200 rounded-2xl divide-y divide-gray-100 bg-white">
+            <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 bg-white">
               {documents.map((doc, idx) => (
                 <div key={idx} className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-[#F9F9F8] border border-gray-200 flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-lg bg-[#F9F9F8] border border-gray-200 flex items-center justify-center">
                       <File className="w-5 h-5 text-gray-500" />
                     </div>
                     <div>
@@ -149,7 +132,7 @@ export const KnowledgeBaseView: React.FC = () => {
                   </div>
                   <button 
                     onClick={() => handleDelete(doc.document_name)}
-                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>

@@ -41,8 +41,9 @@ metadata. To import the current local snapshot:
      https://<your-render-service>.onrender.com/api/admin/import-seed
    ```
 
-4. Restart the Render service, then check `/health`. The response should show
-   the imported chunk count.
+4. Restart the Render service, then check `/health` to confirm the process is
+   healthy. Use the Knowledge Base screen or `/api/documents` to force the
+   imported index to load and verify the documents/chunks.
 
 This is a snapshot import, not durable storage. Render's free filesystem can
 still be reset when the service is replaced. Keep the ZIP privately so it can

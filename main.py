@@ -39,7 +39,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
@@ -146,9 +146,14 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.get("/", include_in_schema=False)
-async def serve_frontend():
-    """Serve the single-page web UI at the root URL."""
-    return FileResponse(STATIC_DIR / "index.html")
+async def api_root():
+    """Identify the backend; the user-facing frontend is deployed on Vercel."""
+    return {
+        "service": "legal-rag-advisor-api",
+        "frontend": "deployed separately",
+        "health": "/health",
+        "docs": "/docs",
+    }
 
 
 def get_current_user_email(x_user_email: str = Header("anonymous")) -> str:

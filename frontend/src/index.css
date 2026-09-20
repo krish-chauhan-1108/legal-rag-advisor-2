@@ -142,7 +142,3 @@ a {
 .prose pre { background: #1e293b; color: #f8fafc; padding: 1em; border-radius: 0.5rem; overflow-x: auto; margin-bottom: 0.75em; }
 .prose pre code { background: none; color: inherit; padding: 0; font-size: 0.85em; }
 .prose blockquote { border-left: 4px solid var(--border-strong); padding-left: 1em; color: var(--text-secondary); font-style: italic; margin-bottom: 0.75em; }
-.prose table { width: 100%; border-collapse: collapse; margin-top: 1em; margin-bottom: 1em; font-size: 0.9em; overflow-x: auto; display: block; }
-.prose th, .prose td { border: 1px solid var(--border-subtle); padding: 0.6em 0.8em; text-align: left; }
-.prose th { background-color: var(--bg-secondary); font-weight: 600; color: var(--text-primary); }
-.prose tr:nth-child(even) { background-color: rgba(0, 0, 0, 0.015); }

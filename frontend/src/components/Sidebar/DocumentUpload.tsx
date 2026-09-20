@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { UploadCloud } from 'lucide-react';
 
 interface DocumentUploadProps {
-  onUpload: (files: File[]) => Promise<void>;
+  onUpload: (file: File) => Promise<void>;
   isUploading: boolean;
   uploadProgress: number;
 }
@@ -25,21 +25,18 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onUpload, isUplo
     e.preventDefault();
     setIsDragover(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
-      if (files.length > 0) {
-        onUpload(files);
+      const file = e.dataTransfer.files[0];
+      if (file.type === 'application/pdf') {
+        onUpload(file);
       } else {
-        alert('Please upload PDF files only.');
+        alert('Please upload a PDF file.');
       }
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const files = Array.from(e.target.files).filter(f => f.type === 'application/pdf');
-      if (files.length > 0) {
-        onUpload(files);
-      }
+      onUpload(e.target.files[0]);
     }
   };
 
@@ -53,7 +50,6 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onUpload, isUplo
       <input 
         type="file" 
         accept="application/pdf" 
-        multiple
         ref={fileInputRef} 
         onChange={handleFileChange}
         disabled={isUploading}
