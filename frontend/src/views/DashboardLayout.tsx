@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Scale, Database, Plus } from 'lucide-react';
 import { SystemStatus } from '../components/Sidebar/SystemStatus';
+import type { ChatSession } from '../types';
 
 const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 // Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
 const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
+const CHAT_HEADERS = { 'X-User-Email': 'anonymous' };
 type ApiStatus = 'checking' | 'online' | 'offline';
 
 export const DashboardLayout: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [health, setHealth] = useState<{ status: ApiStatus; docCount: number }>({ status: 'checking', docCount: 0 });
+  const [chats, setChats] = useState<ChatSession[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -48,13 +52,38 @@ export const DashboardLayout: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadChats = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/chats`, {
+          headers: CHAT_HEADERS,
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`Chat history failed: ${response.status}`);
+
+        const data = await response.json() as ChatSession[];
+        if (active) setChats(Array.isArray(data) ? data : []);
+      } catch {
+        if (active) setChats([]);
+      }
+    };
+
+    loadChats();
+    window.addEventListener('chat-history-updated', loadChats);
+    return () => {
+      active = false;
+      window.removeEventListener('chat-history-updated', loadChats);
+    };
+  }, [location.pathname]);
+
   const handleNewChat = () => {
-    // For a stateless RAG, "New Chat" simply resets the current view by navigating to root
-    // which triggers the ChatView to clear its state if it depended on route params,
-    // or you could just refresh/reload.
-    navigate('/');
-    // To force reload the chat view if already on '/'
-    window.location.reload();
+    if (location.pathname === '/') {
+      window.location.reload();
+    } else {
+      navigate('/');
+    }
   };
 
   return (
@@ -77,7 +106,19 @@ export const DashboardLayout: React.FC = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1 custom-scrollbar">
-          {/* Stateless RAG: No chat history */}
+          {chats.map((chat) => (
+            <button
+              key={chat.id}
+              onClick={() => navigate(`/chat/${chat.id}`)}
+              className="w-full text-left px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-[#1E293B] rounded-md transition-colors truncate"
+              title={chat.title}
+            >
+              {chat.title || 'New Chat'}
+            </button>
+          ))}
+          {chats.length === 0 && (
+            <p className="px-3 py-2 text-xs text-gray-500">No saved chats yet.</p>
+          )}
         </div>
 
         <div className="p-4 border-t border-gray-800 space-y-2">

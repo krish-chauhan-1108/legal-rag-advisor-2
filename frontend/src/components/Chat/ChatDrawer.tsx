@@ -139,8 +139,8 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
             value={modelPreference} 
             onChange={(e) => setModelPreference(e.target.value)}
           >
-            <option value="deep">Deep Analysis (Gemma 31B)</option>
-            <option value="quick">Quick Response (Flash 2.5)</option>
+            <option value="deep">Deep Thinking</option>
+            <option value="quick">Quick Thinking</option>
           </select>
           <div className="transcript-input">
             <textarea 

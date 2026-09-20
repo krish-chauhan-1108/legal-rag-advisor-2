@@ -33,3 +33,21 @@ export interface ChatMessage {
   model_used?: string;
   processing_time_seconds?: number;
 }
+
+export interface PersistedChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  structured_content?: StructuredAnalysis | null;
+  sources?: SourceChunk[] | null;
+  created_at: string;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  user_email: string;
+  messages: PersistedChatMessage[];
+  created_at: string;
+  updated_at: string;
+}

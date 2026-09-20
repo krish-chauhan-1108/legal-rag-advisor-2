@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 
 import { Send, Paperclip, FileText, X, Scale } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
-import type { ChatMessage, StructuredAnalysis } from '../types';
+import type { ChatMessage, ChatSession, StructuredAnalysis } from '../types';
 
 const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 // Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
 const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
+const CHAT_HEADERS = { 'X-User-Email': 'anonymous' };
 
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
 
@@ -88,6 +90,8 @@ const ThinkingAnimation: React.FC = () => {
 };
 
 export const ChatView: React.FC = () => {
+  const navigate = useNavigate();
+  const { id: routeChatId } = useParams<{ id: string }>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [modelPref, setModelPref] = useState('deep');
@@ -96,6 +100,42 @@ export const ChatView: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    let active = true;
+
+    if (!routeChatId) return () => {
+      active = false;
+    };
+
+    const loadChat = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/chats`, {
+          headers: CHAT_HEADERS,
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`Chat history failed: ${response.status}`);
+
+        const chats = await response.json() as ChatSession[];
+        const chat = chats.find((candidate) => candidate.id === routeChatId);
+        if (!active || !chat) return;
+
+        setMessages(chat.messages.map((message) => ({
+          role: message.role,
+          content: message.role === 'assistant' && message.structured_content
+            ? formatAnalysis(message.structured_content)
+            : message.content,
+          sources: message.sources ?? undefined,
+        })));
+      } catch (error) {
+        console.error('Failed to load chat history', error);
+      }
+    };
+
+    loadChat();
+    return () => {
+      active = false;
+    };
+  }, [routeChatId]);
 
 
   useEffect(() => {
@@ -132,15 +172,26 @@ export const ChatView: React.FC = () => {
     setInput('');
 
     try {
+      let activeChatId = routeChatId;
+      if (!activeChatId) {
+        const createResponse = await fetch(`${API_URL}/api/chats`, {
+          method: 'POST',
+          headers: { ...CHAT_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'New Chat' }),
+        });
+        if (!createResponse.ok) throw new Error('Could not create a chat session.');
+        const createdChat = await createResponse.json() as ChatSession;
+        activeChatId = createdChat.id;
+      }
+
       const res = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { ...CHAT_HEADERS, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: newMessage.content || "Analyze the attached document.",
           ephemeral_context: ephemeralContext,
-          model_preference: modelPref
+          model_preference: modelPref,
+          chat_id: activeChatId,
         })
       });
 
@@ -154,6 +205,10 @@ export const ChatView: React.FC = () => {
           processing_time_seconds: data.processing_time_seconds,
         };
         setMessages(prev => [...prev, assistantMessage]);
+        window.dispatchEvent(new Event('chat-history-updated'));
+        if (!routeChatId && activeChatId) {
+          navigate(`/chat/${activeChatId}`, { replace: true });
+        }
       } else {
         let detail = 'The backend could not complete the analysis.';
         try {
@@ -189,8 +244,8 @@ export const ChatView: React.FC = () => {
             onChange={e => setModelPref(e.target.value)}
             className="text-sm bg-white border border-gray-200 rounded-md px-3 py-1.5 outline-none text-gray-700 shadow-sm hover:border-gray-300 focus:border-[#1E293B] focus:ring-1 focus:ring-[#1E293B] transition-all cursor-pointer"
           >
-            <option value="deep">Gemma 4 (31B)</option>
-            <option value="quick">Gemini 2.5 Flash</option>
+            <option value="deep">Deep Thinking</option>
+            <option value="quick">Quick Thinking</option>
           </select>
         </div>
       </header>

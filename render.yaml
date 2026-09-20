@@ -16,7 +16,7 @@ services:
       - key: GEMINI_API_KEY_4
         sync: false
       - key: LLM_MODEL
-        value: gemini-2.5-flash
+        value: gemma-4-31b-it
       - key: EMBEDDING_MODEL
         value: models/gemini-embedding-2
       - key: DATABASE_URL
