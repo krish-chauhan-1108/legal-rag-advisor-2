@@ -4,25 +4,46 @@ import { Scale, Database, Plus } from 'lucide-react';
 import { SystemStatus } from '../components/Sidebar/SystemStatus';
 
 const API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+type ApiStatus = 'checking' | 'online' | 'offline';
 
 export const DashboardLayout: React.FC = () => {
   const navigate = useNavigate();
-  const [health, setHealth] = useState({ isOnline: false, docCount: 0, modelUsed: 'Loading...' });
+  const [health, setHealth] = useState<{ status: ApiStatus; docCount: number }>({ status: 'checking', docCount: 0 });
 
   useEffect(() => {
-    const checkHealth = () => {
-      fetch(`${API_URL}/health`)
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-          if (data) setHealth({ isOnline: data.status === 'healthy', docCount: data.documents_indexed, modelUsed: 'gemma-4-31b-it' });
-          else setHealth(h => ({ ...h, isOnline: false }));
-        })
-        .catch(() => setHealth(h => ({ ...h, isOnline: false })));
+    let active = true;
+    let requestInFlight = false;
+
+    const checkHealth = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
+
+      if (active) setHealth(current => ({ ...current, status: 'checking' }));
+
+      try {
+        const response = await fetch(`${API_URL}/health?ts=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Health check failed: ${response.status}`);
+
+        const data = await response.json();
+        if (active) {
+          setHealth({
+            status: data.status === 'healthy' ? 'online' : 'offline',
+            docCount: Number(data.documents_indexed) || 0,
+          });
+        }
+      } catch {
+        if (active) setHealth(current => ({ ...current, status: 'offline' }));
+      } finally {
+        requestInFlight = false;
+      }
     };
-    
+
     checkHealth();
     const interval = setInterval(checkHealth, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const handleNewChat = () => {
@@ -67,7 +88,7 @@ export const DashboardLayout: React.FC = () => {
           </button>
           
           <div className="mt-4 px-2">
-            <SystemStatus isOnline={health.isOnline} docCount={health.docCount} />
+            <SystemStatus status={health.status} docCount={health.docCount} onRetry={() => window.location.reload()} />
           </div>
         </div>
       </aside>
