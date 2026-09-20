@@ -344,6 +344,18 @@ def rerank(
             top_n=top_n,
         )
 
+    # Render's free instance is intentionally configured for the lightweight
+    # TF-IDF path. Avoid importing sentence-transformers/torch just to discover
+    # that the configured model is the explicit fallback sentinel.
+    if settings.rerank_model == "TF-IDF-FAST-FALLBACK":
+        return rerank_with_tfidf_fallback(
+            query,
+            documents,
+            top_n,
+            case_name=case_name,
+            case_terms=case_terms,
+        )
+
     try:
         return rerank_with_cross_encoder(
             query,

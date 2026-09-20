@@ -121,11 +121,23 @@ export const ChatView: React.FC = () => {
         };
         setMessages(prev => [...prev, assistantMessage]);
       } else {
-        const err = await res.json();
-        console.error(err);
+        let detail = 'The backend could not complete the analysis.';
+        try {
+          const err = await res.json();
+          if (typeof err?.detail === 'string') detail = err.detail;
+        } catch {
+          // Keep the user-facing fallback when the proxy returns a non-JSON error.
+        }
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `I couldn't complete that analysis. ${detail} Please try again in a moment.`
+        }]);
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: 'I couldn\'t reach the analysis service. It may be waking up; please try again in a moment.'
+      }]);
     } finally {
       setIsLoading(false);
     }
