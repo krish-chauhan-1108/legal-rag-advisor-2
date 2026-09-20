@@ -2,10 +2,13 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { DashboardLayout } from './views/DashboardLayout';
 import { ChatView } from './views/ChatView';
 import { AccountView } from './views/AccountView';
+import { LegalPage } from './views/LegalPage';
 
 const AppContent = () => {
   return (
     <Routes>
+      <Route path="/privacy" element={<LegalPage />} />
+      <Route path="/terms" element={<LegalPage />} />
       <Route path="/" element={<DashboardLayout />}>
         {/* Default dashboard view */}
         <Route index element={<ChatView />} />
