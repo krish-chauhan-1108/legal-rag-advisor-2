@@ -90,6 +90,19 @@ def _get_persisted_chunk_count() -> int:
         return 0
 
 
+def _auto_restore_seed_snapshot() -> None:
+    """Restore the bundled fixed document index when local storage is empty."""
+    project_root = Path(__file__).resolve().parent
+    seed_archive = project_root / "deployment-seed.zip"
+
+    if not seed_archive.is_file() or _get_persisted_chunk_count() > 0:
+        return
+
+    logger.info("Restoring bundled RAG seed snapshot from %s", seed_archive.name)
+    _safe_extract_seed_archive(seed_archive)
+    logger.info("Bundled RAG seed snapshot restored (%s chunks)", _get_persisted_chunk_count())
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Application Lifecycle
 # ═══════════════════════════════════════════════════════════════════════════
@@ -119,6 +132,8 @@ async def lifespan(app: FastAPI):
     settings.ensure_directories()
     print("[Progress] Ensuring STATIC_DIR exists...")
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
+
+    _auto_restore_seed_snapshot()
     
     print("[Progress] Initializing application database...")
     db_models.Base.metadata.create_all(bind=engine)
