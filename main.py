@@ -49,6 +49,7 @@ from config import settings
 from database import engine, get_db, Base
 import models.db_models as db_models
 import json
+import sqlite3
 
 print("[Progress] Loading schemas...")
 from models.schemas import (
@@ -69,6 +70,20 @@ logger = get_logger(__name__)
 
 _health_documents_indexed = 0
 _health_vector_store_ready = False
+
+
+def _get_persisted_chunk_count() -> int:
+    """Read the persisted Chroma chunk count without initializing embeddings."""
+    chroma_db = Path(settings.chroma_persist_dir) / "chroma.sqlite3"
+    if not chroma_db.is_file():
+        return 0
+
+    try:
+        with sqlite3.connect(f"file:{chroma_db}?mode=ro", uri=True) as connection:
+            return int(connection.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0])
+    except (sqlite3.Error, TypeError, ValueError) as exc:
+        logger.warning("Could not read persisted Chroma chunk count: %s", exc)
+        return 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -107,7 +122,8 @@ async def lifespan(app: FastAPI):
     print("[Progress] Application startup logic complete.")
     logger.info("Startup complete. Server ready on http://%s:%d", settings.host, settings.port)
     logger.info("=" * 60)
-    global _health_vector_store_ready
+    global _health_documents_indexed, _health_vector_store_ready
+    _health_documents_indexed = _get_persisted_chunk_count()
     _health_vector_store_ready = (Path(settings.chroma_persist_dir) / "chroma.sqlite3").exists()
 
     yield  # ← Application runs here.
@@ -252,6 +268,10 @@ async def health_check() -> HealthResponse:
     Includes the number of indexed document chunks and whether the vector
     store is operational.
     """
+    global _health_documents_indexed, _health_vector_store_ready
+    _health_documents_indexed = _get_persisted_chunk_count()
+    _health_vector_store_ready = (Path(settings.chroma_persist_dir) / "chroma.sqlite3").exists()
+
     return HealthResponse(
         status="healthy",
         documents_indexed=_health_documents_indexed,
@@ -331,7 +351,7 @@ def import_seed_snapshot(
         vector_module._embedding_function = None
         vector_module._vector_store = None
         global _health_documents_indexed, _health_vector_store_ready
-        _health_documents_indexed = 0
+        _health_documents_indexed = _get_persisted_chunk_count()
         _health_vector_store_ready = True
 
         return {

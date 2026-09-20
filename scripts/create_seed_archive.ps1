@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$root = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
+$root = (Get-Item -LiteralPath (Join-Path $PSScriptRoot "..")).FullName.TrimEnd('\', '/')
 $output = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $OutputPath))
 $required = @(
     (Join-Path $root "legal.db"),
@@ -26,7 +26,7 @@ $archive = [System.IO.Compression.ZipFile]::Open($output, [System.IO.Compression
 try {
     $files = Get-ChildItem -LiteralPath (Join-Path $root "legal.db"), (Join-Path $root "data\chroma_db"), (Join-Path $root "data\uploads") -Recurse -File -ErrorAction SilentlyContinue
     foreach ($file in $files) {
-        $relative = $file.FullName.Substring($root.Length + 1).Replace("\", "/")
+        $relative = $file.FullName.Substring($root.Length).TrimStart('\', '/').Replace("\", "/")
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $file.FullName, $relative, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
     }
 }
