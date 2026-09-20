@@ -4,12 +4,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Send, Paperclip, FileText, X, Scale } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
 import type { ChatMessage, ChatSession, StructuredAnalysis } from '../types';
+import { authHeaders, useAuth } from '../auth/auth';
 
 const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 // Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
 const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
-const CHAT_HEADERS = { 'X-User-Email': 'anonymous' };
-
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
 
 const formatAnalysis = (analysis: unknown): string => {
@@ -92,6 +91,7 @@ const ThinkingAnimation: React.FC = () => {
 export const ChatView: React.FC = () => {
   const navigate = useNavigate();
   const { id: routeChatId } = useParams<{ id: string }>();
+  const { credential, user } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [modelPref, setModelPref] = useState('deep');
@@ -103,14 +103,14 @@ export const ChatView: React.FC = () => {
   useEffect(() => {
     let active = true;
 
-    if (!routeChatId) return () => {
+    if (!routeChatId || !credential) return () => {
       active = false;
     };
 
     const loadChat = async () => {
       try {
         const response = await fetch(`${API_URL}/api/chats`, {
-          headers: CHAT_HEADERS,
+          headers: authHeaders(credential),
           cache: 'no-store',
         });
         if (!response.ok) throw new Error(`Chat history failed: ${response.status}`);
@@ -135,7 +135,7 @@ export const ChatView: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [routeChatId]);
+  }, [credential, routeChatId]);
 
 
   useEffect(() => {
@@ -144,6 +144,10 @@ export const ChatView: React.FC = () => {
 
   const handleSend = async () => {
     if ((!input.trim() && !ephemeralFile) || isLoading) return;
+    if (!credential) {
+      navigate('/account');
+      return;
+    }
 
     let ephemeralContext = null;
 
@@ -176,7 +180,7 @@ export const ChatView: React.FC = () => {
       if (!activeChatId) {
         const createResponse = await fetch(`${API_URL}/api/chats`, {
           method: 'POST',
-          headers: { ...CHAT_HEADERS, 'Content-Type': 'application/json' },
+          headers: { ...authHeaders(credential), 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: 'New Chat' }),
         });
         if (!createResponse.ok) throw new Error('Could not create a chat session.');
@@ -186,7 +190,7 @@ export const ChatView: React.FC = () => {
 
       const res = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
-        headers: { ...CHAT_HEADERS, 'Content-Type': 'application/json' },
+        headers: { ...authHeaders(credential), 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: newMessage.content || "Analyze the attached document.",
           ephemeral_context: ephemeralContext,
@@ -255,7 +259,12 @@ export const ChatView: React.FC = () => {
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-gray-400">
             <Scale className="w-12 h-12 mb-4 opacity-20" />
-            <p className="text-sm">Start a new legal inquiry...</p>
+            <p className="text-sm">{user ? 'Start a new legal inquiry...' : 'Sign in with Google to start chatting.'}</p>
+            {!user && (
+              <button type="button" onClick={() => navigate('/account')} className="mt-4 rounded-lg bg-[#1E293B] px-4 py-2 text-sm text-white hover:bg-[#0F172A]">
+                Open Account
+              </button>
+            )}
           </div>
         )}
         {messages.map((msg, idx) => (
@@ -292,6 +301,7 @@ export const ChatView: React.FC = () => {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
+              disabled={!user}
               className="text-gray-400 hover:text-[#1E293B] transition-colors p-1"
               title="Attach document for this query only"
             >
@@ -303,20 +313,21 @@ export const ChatView: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="Ask a legal question or attach a document for immediate analysis..."
+              placeholder={user ? 'Ask a legal question or attach a document for immediate analysis...' : 'Sign in to ask TRANA a question...'}
+              disabled={!user}
               className="flex-1 bg-transparent border-none focus:ring-0 text-[#121212] placeholder-gray-400 text-sm min-w-0 outline-none"
             />
             
             <button
               onClick={handleSend}
-              disabled={isLoading || (!input.trim() && !ephemeralFile)}
+              disabled={!user || isLoading || (!input.trim() && !ephemeralFile)}
               className="bg-[#1E293B] text-white p-2 rounded-lg hover:bg-[#0F172A] disabled:opacity-50 transition-colors"
             >
               <Send className="w-4 h-4" />
             </button>
           </div>
           <p className="text-center text-xs text-gray-400 mt-2">
-            Documents attached here are ephemeral and NOT saved to your permanent Knowledge Base.
+            Documents attached here are ephemeral and are not added to TRANA's indexed documents.
           </p>
         </div>
       </div>

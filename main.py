@@ -1,5 +1,5 @@
 """
-Legal RAG Advisor — FastAPI Application
+TRANA — FastAPI Application
 =======================================
 
 A production-ready AI Legal Advisor API that:
@@ -41,6 +41,8 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Depends, He
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 from sqlalchemy.orm import Session
 
 print("[Progress] Loading config and settings...")
@@ -60,6 +62,8 @@ from models.schemas import (
     ChatSessionCreate,
     ChatSessionResponse,
     ChatMessageResponse,
+    GoogleAuthRequest,
+    GoogleAuthResponse,
 )
 from key_manager import rotate_key
 
@@ -97,7 +101,7 @@ async def lifespan(app: FastAPI):
 
     On startup:
       - Ensure required directories exist.
-      - Initialize the SQLite schema.
+      - Initialize the configured SQL schema.
 
     Heavy RAG modules are loaded lazily by the endpoints that need them. This
     lets Uvicorn bind Render's port before importing the document-processing
@@ -107,7 +111,7 @@ async def lifespan(app: FastAPI):
       - Log a clean shutdown message.
     """
     logger.info("=" * 60)
-    logger.info("  Legal RAG Advisor — Starting up")
+    logger.info("  TRANA — Starting up")
     logger.info("=" * 60)
 
     # Ensure data directories exist.
@@ -116,7 +120,7 @@ async def lifespan(app: FastAPI):
     print("[Progress] Ensuring STATIC_DIR exists...")
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     
-    print("[Progress] Initializing SQLite database...")
+    print("[Progress] Initializing application database...")
     db_models.Base.metadata.create_all(bind=engine)
 
     print("[Progress] Application startup logic complete.")
@@ -128,7 +132,7 @@ async def lifespan(app: FastAPI):
 
     yield  # ← Application runs here.
 
-    logger.info("Legal RAG Advisor — Shutting down gracefully.")
+    logger.info("TRANA — Shutting down gracefully.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -136,7 +140,7 @@ async def lifespan(app: FastAPI):
 # ═══════════════════════════════════════════════════════════════════════════
 
 app = FastAPI(
-    title="Legal RAG Advisor",
+    title="TRANA",
     description=(
         "AI-powered legal document analysis API. Upload contracts and legal "
         "agreements, then ask natural-language questions to receive structured, "
@@ -165,15 +169,64 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 async def api_root():
     """Identify the backend; the user-facing frontend is deployed on Vercel."""
     return {
-        "service": "legal-rag-advisor-api",
+        "service": "trana-api",
         "frontend": "deployed separately",
         "health": "/health",
         "docs": "/docs",
     }
 
 
-def get_current_user_email(x_user_email: str = Header("anonymous")) -> str:
-    return x_user_email
+def _verify_google_credential(credential: str) -> dict:
+    """Verify a Google ID token and return its trusted claims."""
+    if not settings.google_client_id:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured on the backend.")
+
+    try:
+        claims = id_token.verify_oauth2_token(
+            credential,
+            google_requests.Request(),
+            settings.google_client_id,
+        )
+    except (ValueError, TypeError) as exc:
+        logger.warning("Rejected invalid Google credential: %s", exc)
+        raise HTTPException(status_code=401, detail="Your Google sign-in has expired or is invalid.") from exc
+
+    issuer = claims.get("iss")
+    if issuer not in {"accounts.google.com", "https://accounts.google.com"}:
+        raise HTTPException(status_code=401, detail="The sign-in issuer is not Google.")
+    if not claims.get("email") or not claims.get("email_verified"):
+        raise HTTPException(status_code=401, detail="A verified Google email is required.")
+    return claims
+
+
+def get_current_user_email(authorization: str | None = Header(default=None)) -> str:
+    """Return the verified Google email for authenticated user-facing requests."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Sign in with Google to use chat history.")
+    claims = _verify_google_credential(authorization.split(" ", 1)[1].strip())
+    return str(claims["email"])
+
+
+@app.post("/api/auth/google", response_model=GoogleAuthResponse, tags=["Authentication"])
+def authenticate_google(auth_in: GoogleAuthRequest, db: Session = Depends(get_db)):
+    """Verify a Google credential and upsert the corresponding application user."""
+    claims = _verify_google_credential(auth_in.credential)
+    google_id = str(claims["sub"])
+    email = str(claims["email"])
+    user = db.query(db_models.User).filter(db_models.User.google_id == google_id).first()
+    if user is None:
+        user = db.query(db_models.User).filter(db_models.User.email == email).first()
+    if user is None:
+        user = db_models.User(google_id=google_id, email=email)
+        db.add(user)
+
+    user.google_id = google_id
+    user.email = email
+    user.name = claims.get("name")
+    user.picture = claims.get("picture")
+    db.commit()
+    db.refresh(user)
+    return {"user": user}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -217,11 +270,11 @@ def create_chat(chat_in: ChatSessionCreate, user_email: str = Depends(get_curren
     )
     db.add(db_session)
     
-    # Add initial trana message
+    # Add initial TRANA message
     init_msg = db_models.ChatMessage(
         session_id=new_id,
         role="assistant",
-        content="I'm Trana—your friendly legal assistant. How can I help you today?"
+        content="I'm TRANA—your friendly legal assistant. How can I help you today?"
     )
     db.add(init_msg)
     
@@ -263,7 +316,7 @@ def delete_chat(chat_id: str, user_email: str = Depends(get_current_user_email),
 )
 async def health_check() -> HealthResponse:
     """
-    Return the health status of the Legal RAG Advisor.
+    Return the health status of TRANA.
 
     Includes the number of indexed document chunks and whether the vector
     store is operational.

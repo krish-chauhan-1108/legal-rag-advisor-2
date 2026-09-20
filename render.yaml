@@ -20,6 +20,8 @@ services:
       - key: EMBEDDING_MODEL
         value: models/gemini-embedding-2
       - key: DATABASE_URL
-        value: sqlite:///./legal.db
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
       - key: SEED_UPLOAD_TOKEN
         sync: false

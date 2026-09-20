@@ -1,5 +1,5 @@
 """
-Configuration module for the Legal RAG Advisor.
+Configuration module for TRANA.
 
 Centralizes all application settings using pydantic-settings for type-safe
 environment variable parsing with sensible defaults for local development.

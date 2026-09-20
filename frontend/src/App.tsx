@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { DashboardLayout } from './views/DashboardLayout';
 import { ChatView } from './views/ChatView';
-import { KnowledgeBaseView } from './views/KnowledgeBaseView';
+import { AccountView } from './views/AccountView';
 
 const AppContent = () => {
   return (
@@ -10,7 +10,7 @@ const AppContent = () => {
         {/* Default dashboard view */}
         <Route index element={<ChatView />} />
         <Route path="chat/:id" element={<ChatView />} />
-        <Route path="knowledge-base" element={<KnowledgeBaseView />} />
+        <Route path="account" element={<AccountView />} />
       </Route>
     </Routes>
   );

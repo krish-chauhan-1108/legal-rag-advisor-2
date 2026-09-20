@@ -100,6 +100,22 @@ class ChatSessionResponse(BaseModel):
     updated_at: str
 
 
+class GoogleAuthRequest(BaseModel):
+    credential: str = Field(..., min_length=20)
+
+
+class AuthenticatedUserResponse(BaseModel):
+    id: str
+    google_id: str
+    email: str
+    name: Optional[str] = None
+    picture: Optional[str] = None
+
+
+class GoogleAuthResponse(BaseModel):
+    user: AuthenticatedUserResponse
+
+
 class AnalysisRequest(BaseModel):
     """Request body for the ``/api/analyze`` endpoint."""
 

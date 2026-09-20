@@ -17,7 +17,7 @@ The repository is prepared for a free Render backend and Vercel frontend.
 7. Open `https://<your-render-service>.onrender.com/health` and confirm it returns
    a healthy JSON response.
 
-## 1a. Import the existing knowledge base
+## 1a. Import the existing document index
 
 The actual RAG index is `data/chroma_db`; `legal.db` only stores chat/session
 metadata. To import the current local snapshot:
@@ -42,12 +42,24 @@ metadata. To import the current local snapshot:
    ```
 
 4. Restart the Render service, then check `/health` to confirm the process is
-   healthy. Use the Knowledge Base screen or `/api/documents` to force the
+   healthy. Use `/api/documents` to inspect the
    imported index to load and verify the documents/chunks.
 
 This is a snapshot import, not durable storage. Render's free filesystem can
 still be reset when the service is replaced. Keep the ZIP privately so it can
 be uploaded again if needed.
+
+## 1b. Configure Google accounts and durable chat history
+
+TRANA verifies Google ID tokens and stores chat sessions by verified email.
+Set these variables in Render:
+
+- `GOOGLE_CLIENT_ID`: the Google OAuth web-client ID.
+- `DATABASE_URL`: a PostgreSQL connection string, preferably the provider's
+  pooled/session connection for Render.
+
+Set the same client ID in Vercel as `VITE_GOOGLE_CLIENT_ID`, and add the Vercel
+production URL to the OAuth client's authorized JavaScript origins.
 
 The free Render filesystem is ephemeral. SQLite, uploaded files, and the local
 Chroma index can be lost after a redeploy or instance replacement. Re-upload
@@ -68,6 +80,6 @@ using this for persistent production data.
 
 ## 3. First-use order
 
-After deployment, upload at least one PDF from the Knowledge Base screen before
+After deployment, import the prepared seed archive before
 asking a document-grounded question. The backend intentionally rejects analysis
 requests while the vector index is empty.

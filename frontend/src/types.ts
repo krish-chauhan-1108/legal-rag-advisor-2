@@ -51,3 +51,11 @@ export interface ChatSession {
   created_at: string;
   updated_at: string;
 }
+
+export interface AuthUser {
+  id: string;
+  google_id: string;
+  email: string;
+  name?: string | null;
+  picture?: string | null;
+}

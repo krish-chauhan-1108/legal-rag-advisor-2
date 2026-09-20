@@ -1,18 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Scale, Database, Plus } from 'lucide-react';
+import { Scale, Plus, UserCircle } from 'lucide-react';
 import { SystemStatus } from '../components/Sidebar/SystemStatus';
 import type { ChatSession } from '../types';
+import { authHeaders, useAuth } from '../auth/auth';
 
 const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 // Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
 const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
-const CHAT_HEADERS = { 'X-User-Email': 'anonymous' };
 type ApiStatus = 'checking' | 'online' | 'offline';
 
 export const DashboardLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { credential, user } = useAuth();
   const [health, setHealth] = useState<{ status: ApiStatus; docCount: number }>({ status: 'checking', docCount: 0 });
   const [chats, setChats] = useState<ChatSession[]>([]);
 
@@ -56,9 +57,13 @@ export const DashboardLayout: React.FC = () => {
     let active = true;
 
     const loadChats = async () => {
+      if (!credential) {
+        if (active) setChats([]);
+        return;
+      }
       try {
         const response = await fetch(`${API_URL}/api/chats`, {
-          headers: CHAT_HEADERS,
+          headers: authHeaders(credential),
           cache: 'no-store',
         });
         if (!response.ok) throw new Error(`Chat history failed: ${response.status}`);
@@ -76,7 +81,7 @@ export const DashboardLayout: React.FC = () => {
       active = false;
       window.removeEventListener('chat-history-updated', loadChats);
     };
-  }, [location.pathname]);
+  }, [credential, location.pathname]);
 
   const handleNewChat = () => {
     if (location.pathname === '/') {
@@ -93,7 +98,7 @@ export const DashboardLayout: React.FC = () => {
         <div className="p-6 pb-2">
           <div className="flex items-center gap-3 mb-8 cursor-pointer" onClick={() => navigate('/')}>
             <Scale className="w-7 h-7 text-white" strokeWidth={1.5} />
-            <h1 className="text-xl font-serif tracking-tight">LawLLM</h1>
+            <h1 className="text-xl font-serif tracking-tight">TRANA</h1>
           </div>
           
           <button 
@@ -123,11 +128,15 @@ export const DashboardLayout: React.FC = () => {
 
         <div className="p-4 border-t border-gray-800 space-y-2">
           <button
-            onClick={() => navigate('/knowledge-base')}
+            onClick={() => navigate('/account')}
             className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-[#1E293B] rounded-md transition-colors text-left"
           >
-            <Database className="w-4 h-4" />
-            Knowledge Base
+            {user?.picture ? (
+              <img src={user.picture} alt="" className="w-4 h-4 rounded-full" />
+            ) : (
+              <UserCircle className="w-4 h-4" />
+            )}
+            {user?.name || 'Account'}
           </button>
           
           <div className="mt-4 px-2">
