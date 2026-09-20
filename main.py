@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import shutil
 import secrets
-import threading
 import time
 from pathlib import PurePosixPath
 from zipfile import BadZipFile, ZipFile
@@ -72,19 +71,6 @@ _health_documents_indexed = 0
 _health_vector_store_ready = False
 
 
-def _warm_vector_store_state() -> None:
-    """Warm Chroma after the web server is available, not before port binding."""
-    global _health_documents_indexed, _health_vector_store_ready
-    try:
-        from retrieval.vector_store import get_document_count
-
-        _health_documents_indexed = get_document_count()
-        _health_vector_store_ready = True
-        logger.info("Vector store warm-up complete: %d indexed chunks.", _health_documents_indexed)
-    except Exception as exc:
-        logger.warning("Vector store warm-up deferred: %s", exc)
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Application Lifecycle
 # ═══════════════════════════════════════════════════════════════════════════
@@ -121,11 +107,8 @@ async def lifespan(app: FastAPI):
     print("[Progress] Application startup logic complete.")
     logger.info("Startup complete. Server ready on http://%s:%d", settings.host, settings.port)
     logger.info("=" * 60)
-    chroma_db_file = Path(settings.chroma_persist_dir) / "chroma.sqlite3"
-    if chroma_db_file.exists():
-        threading.Thread(target=_warm_vector_store_state, name="vector-store-warmup", daemon=True).start()
-    else:
-        logger.info("No Chroma snapshot found; waiting for seed import or first ingestion.")
+    global _health_vector_store_ready
+    _health_vector_store_ready = (Path(settings.chroma_persist_dir) / "chroma.sqlite3").exists()
 
     yield  # ← Application runs here.
 
@@ -344,8 +327,7 @@ def import_seed_snapshot(
         vector_module._vector_store = None
         global _health_documents_indexed, _health_vector_store_ready
         _health_documents_indexed = 0
-        _health_vector_store_ready = False
-        threading.Thread(target=_warm_vector_store_state, name="vector-store-warmup", daemon=True).start()
+        _health_vector_store_ready = True
 
         return {
             "status": "success",
@@ -567,7 +549,10 @@ async def analyze(
     from llm.chain import run_analysis_pipeline
     from retrieval.vector_store import get_document_count
 
+    global _health_documents_indexed, _health_vector_store_ready
     doc_count = get_document_count()
+    _health_documents_indexed = doc_count
+    _health_vector_store_ready = True
     if doc_count == 0:
         raise HTTPException(
             status_code=400,
