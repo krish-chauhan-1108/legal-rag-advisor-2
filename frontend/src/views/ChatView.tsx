@@ -4,7 +4,7 @@ import { Send, Paperclip, FileText, X, Scale } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
 import type { ChatMessage } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
 

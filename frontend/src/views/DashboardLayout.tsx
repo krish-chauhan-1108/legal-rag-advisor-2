@@ -3,7 +3,7 @@ import { Outlet, useNavigate } from 'react-router-dom';
 import { Scale, Database, Plus } from 'lucide-react';
 import { SystemStatus } from '../components/Sidebar/SystemStatus';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export const DashboardLayout: React.FC = () => {
   const navigate = useNavigate();

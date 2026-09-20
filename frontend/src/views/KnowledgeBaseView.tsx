@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Database, UploadCloud, File, Trash2, Loader2, CheckCircle2 } from 'lucide-react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 interface DocumentInfo {
   document_name: string;
