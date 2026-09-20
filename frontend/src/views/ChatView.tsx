@@ -2,13 +2,45 @@ import React, { useState, useRef, useEffect } from 'react';
 
 import { Send, Paperclip, FileText, X, Scale } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
-import type { ChatMessage } from '../types';
+import type { ChatMessage, StructuredAnalysis } from '../types';
 
 const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 // Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
 const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
 
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
+
+const formatAnalysis = (analysis: unknown): string => {
+  if (typeof analysis === 'string') return analysis;
+  if (!analysis || typeof analysis !== 'object') return 'The backend returned an empty analysis.';
+
+  const result = analysis as StructuredAnalysis;
+  const sections: string[] = [];
+
+  if (result.conversational_reply) sections.push(result.conversational_reply);
+  if (result.general_analysis) sections.push(`## General Legal Analysis\n${result.general_analysis}`);
+  if (result.situation_meaning) sections.push(`## What This Situation Means\n${result.situation_meaning}`);
+  if (result.bail_status) sections.push(`## Bail Status\n${result.bail_status}`);
+  if (result.next_24_hours?.length) {
+    sections.push(`## What To Do Next\n${result.next_24_hours.map(item => `- ${item}`).join('\n')}`);
+  }
+  if (result.rights?.length) {
+    sections.push(`## Your Rights\n${result.rights.map(item => `- ${item}`).join('\n')}`);
+  }
+  if (result.handling_authority) sections.push(`## Relevant Authority\n${result.handling_authority}`);
+  if (result.applicable_laws?.length) {
+    const laws = result.applicable_laws.map(law => {
+      const title = [law.code, law.section].filter(Boolean).join(' — ');
+      return `### ${title || 'Applicable law'}\n${law.explanation || law.quote || ''}`;
+    });
+    sections.push(`## Applicable Laws\n${laws.join('\n\n')}`);
+  }
+  if (result.suggest_lawyer) {
+    sections.push('> Consider consulting a qualified lawyer for advice about your specific situation.');
+  }
+
+  return sections.join('\n\n') || 'The backend returned an analysis without readable content.';
+};
 
 const ThinkingAnimation: React.FC = () => {
   const [index, setIndex] = useState(0);
@@ -116,8 +148,10 @@ export const ChatView: React.FC = () => {
         const data = await res.json();
         const assistantMessage: ChatMessage = {
           role: 'assistant',
-          content: data.analysis,
-          sources: data.sources
+          content: formatAnalysis(data.analysis),
+          sources: data.sources,
+          model_used: data.model_used,
+          processing_time_seconds: data.processing_time_seconds,
         };
         setMessages(prev => [...prev, assistantMessage]);
       } else {
