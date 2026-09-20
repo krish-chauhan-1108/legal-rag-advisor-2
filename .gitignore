@@ -21,6 +21,7 @@ chroma_db/
 vector_db/
 *.db
 Microsoft/
+*-seed.zip
 
 # OS Files
 .DS_Store

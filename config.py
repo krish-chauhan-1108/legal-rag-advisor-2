@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     # Keep the local SQLite database in the project directory by default. The
     # value can be overridden with DATABASE_URL on Render or another host.
     database_url: str = "sqlite:///./legal.db"
+    seed_upload_token: str = ""
 
     # ── Helpers ─────────────────────────────────────────────────────────────
     def ensure_directories(self) -> None:

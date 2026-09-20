@@ -17,6 +17,37 @@ The repository is prepared for a free Render backend and Vercel frontend.
 7. Open `https://<your-render-service>.onrender.com/health` and confirm it returns
    a healthy JSON response.
 
+## 1a. Import the existing knowledge base
+
+The actual RAG index is `data/chroma_db`; `legal.db` only stores chat/session
+metadata. To import the current local snapshot:
+
+1. In Render, set a long random `SEED_UPLOAD_TOKEN` environment variable.
+2. Locally run:
+
+   ```powershell
+   .\scripts\create_seed_archive.ps1
+   ```
+
+   This creates `deployment-seed.zip` from `legal.db`, `data/chroma_db`, and
+   any saved PDFs under `data/uploads`. The archive is intentionally ignored by
+   Git and must not be committed.
+3. Upload it to the deployed service:
+
+   ```powershell
+   curl.exe -X POST `
+     -H "X-Seed-Token: YOUR_SEED_UPLOAD_TOKEN" `
+     -F "archive=@deployment-seed.zip" `
+     https://<your-render-service>.onrender.com/api/admin/import-seed
+   ```
+
+4. Restart the Render service, then check `/health`. The response should show
+   the imported chunk count.
+
+This is a snapshot import, not durable storage. Render's free filesystem can
+still be reset when the service is replaced. Keep the ZIP privately so it can
+be uploaded again if needed.
+
 The free Render filesystem is ephemeral. SQLite, uploaded files, and the local
 Chroma index can be lost after a redeploy or instance replacement. Re-upload
 the knowledge-base documents after such an event, or migrate storage before

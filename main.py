@@ -30,7 +30,11 @@ Usage
 from __future__ import annotations
 
 import shutil
+import secrets
+import threading
 import time
+from pathlib import PurePosixPath
+from zipfile import BadZipFile, ZipFile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -47,18 +51,6 @@ from database import engine, get_db, Base
 import models.db_models as db_models
 import json
 
-print("[Progress] Loading chunking module (Spacy/NLTK might load here)...")
-from ingestion.chunker import chunk_document
-
-print("[Progress] Loading DOCX parser...")
-from ingestion.docx_parser import parse_docx
-
-print("[Progress] Loading PDF parser...")
-from ingestion.parser import parse_pdf
-
-print("[Progress] Loading LLM chain (Transformers/SentenceTransformers might load here)...")
-from llm.chain import run_analysis_pipeline
-
 print("[Progress] Loading schemas...")
 from models.schemas import (
     AnalysisRequest,
@@ -69,21 +61,28 @@ from models.schemas import (
     ChatSessionResponse,
     ChatMessageResponse,
 )
-from retrieval.bm25_retriever import rebuild_bm25_from_vector_store
-
-print("[Progress] Loading Vector Store dependencies...")
-from retrieval.vector_store import (
-    add_documents,
-    delete_document,
-    get_document_count,
-    get_vector_store,
-)
 from key_manager import rotate_key
 
 print("[Progress] Loading Logger...")
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_health_documents_indexed = 0
+_health_vector_store_ready = False
+
+
+def _warm_vector_store_state() -> None:
+    """Warm Chroma after the web server is available, not before port binding."""
+    global _health_documents_indexed, _health_vector_store_ready
+    try:
+        from retrieval.vector_store import get_document_count
+
+        _health_documents_indexed = get_document_count()
+        _health_vector_store_ready = True
+        logger.info("Vector store warm-up complete: %d indexed chunks.", _health_documents_indexed)
+    except Exception as exc:
+        logger.warning("Vector store warm-up deferred: %s", exc)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -97,8 +96,11 @@ async def lifespan(app: FastAPI):
 
     On startup:
       - Ensure required directories exist.
-      - Initialize the vector store.
-      - Rebuild the BM25 index from any previously persisted documents.
+      - Initialize the SQLite schema.
+
+    Heavy RAG modules are loaded lazily by the endpoints that need them. This
+    lets Uvicorn bind Render's port before importing the document-processing
+    and retrieval stack.
 
     On shutdown:
       - Log a clean shutdown message.
@@ -116,15 +118,14 @@ async def lifespan(app: FastAPI):
     print("[Progress] Initializing SQLite database...")
     db_models.Base.metadata.create_all(bind=engine)
 
-    print("[Progress] Rebuilding BM25 index on startup...")
-    try:
-        rebuild_bm25_from_vector_store()
-    except Exception as exc:
-        logger.error(f"Failed to rebuild BM25 index on startup: {exc}")
-
     print("[Progress] Application startup logic complete.")
     logger.info("Startup complete. Server ready on http://%s:%d", settings.host, settings.port)
     logger.info("=" * 60)
+    chroma_db_file = Path(settings.chroma_persist_dir) / "chroma.sqlite3"
+    if chroma_db_file.exists():
+        threading.Thread(target=_warm_vector_store_state, name="vector-store-warmup", daemon=True).start()
+    else:
+        logger.info("No Chroma snapshot found; waiting for seed import or first ingestion.")
 
     yield  # ← Application runs here.
 
@@ -263,21 +264,98 @@ async def health_check() -> HealthResponse:
     Includes the number of indexed document chunks and whether the vector
     store is operational.
     """
-    try:
-        count = get_document_count()
-        vs_ready = True
-    except Exception:
-        count = 0
-        vs_ready = False
-
     return HealthResponse(
-        status="healthy" if vs_ready else "degraded",
-        documents_indexed=count,
-        vector_store_ready=vs_ready,
+        status="healthy",
+        documents_indexed=_health_documents_indexed,
+        vector_store_ready=_health_vector_store_ready,
     )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# One-time Seed Snapshot Import
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+def _safe_extract_seed_archive(archive_path: Path) -> None:
+    """Extract only the application database and Chroma snapshot paths."""
+    project_root = Path(__file__).resolve().parent
+    allowed_root = project_root.resolve()
+
+    with ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            member_name = member.filename.replace("\\", "/")
+            path_parts = PurePosixPath(member_name).parts
+            if (
+                not member_name
+                or member_name.startswith("/")
+                or ".." in path_parts
+                or (path_parts[0] not in {"legal.db", "data"})
+            ):
+                raise ValueError(f"Seed archive contains an unsafe path: {member.filename}")
+
+            destination = (project_root / member_name).resolve()
+            try:
+                destination.relative_to(allowed_root)
+            except ValueError as exc:
+                raise ValueError(f"Seed archive escapes the application directory: {member.filename}") from exc
+
+            if member.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+                continue
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, destination.open("wb") as target:
+                shutil.copyfileobj(source, target)
+
+    chroma_dir = (project_root / settings.chroma_persist_dir).resolve()
+    if not (project_root / "legal.db").is_file() or not chroma_dir.is_dir():
+        raise ValueError("Seed archive must contain legal.db and data/chroma_db.")
+
+
+@app.post("/api/admin/import-seed", tags=["Admin"], include_in_schema=False)
+def import_seed_snapshot(
+    archive: UploadFile = File(...),
+    x_seed_token: str | None = Header(default=None),
+) -> dict:
+    """Replace the local SQLite/Chroma state with a supplied ZIP snapshot."""
+    expected_token = settings.seed_upload_token
+    if not expected_token or not x_seed_token or not secrets.compare_digest(x_seed_token, expected_token):
+        raise HTTPException(status_code=403, detail="Seed import is not authorized.")
+
+    if not archive.filename or not archive.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Upload a ZIP seed archive.")
+
+    settings.ensure_directories()
+    temp_archive = Path(settings.upload_dir) / ".seed-upload.zip"
+    try:
+        with temp_archive.open("wb") as destination:
+            shutil.copyfileobj(archive.file, destination)
+        try:
+            _safe_extract_seed_archive(temp_archive)
+        except (BadZipFile, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid seed archive: {exc}") from exc
+
+        # Drop cached handles so the next request reads the imported snapshot.
+        from database import engine as database_engine
+        database_engine.dispose()
+        import retrieval.bm25_retriever as bm25_module
+        import retrieval.vector_store as vector_module
+        bm25_module._bm25_retriever = None
+        vector_module._embedding_function = None
+        vector_module._vector_store = None
+        global _health_documents_indexed, _health_vector_store_ready
+        _health_documents_indexed = 0
+        _health_vector_store_ready = False
+        threading.Thread(target=_warm_vector_store_state, name="vector-store-warmup", daemon=True).start()
+
+        return {
+            "status": "success",
+            "message": "Seed snapshot imported. The existing SQLite and Chroma data are now active.",
+            "restart_recommended": True,
+        }
+    finally:
+        temp_archive.unlink(missing_ok=True)
+
+
 # Document Ingestion
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -297,6 +375,11 @@ def ingest_document(
     Upload PDFs, parse them, chunk them with section-aware splitting, embed
     the chunks, and store them in the vector database.
     """
+    from ingestion.chunker import chunk_document
+    from ingestion.parser import parse_pdf
+    from retrieval.bm25_retriever import rebuild_bm25_from_vector_store
+    from retrieval.vector_store import add_documents
+
     print(f"[Progress] Validating {len(files)} uploaded documents...")
     all_chunks = []
     processed_names = []
@@ -415,6 +498,9 @@ def extract_document(
     Parses a PDF or DOCX file and returns the raw text without saving
     it to the RAG database.
     """
+    from ingestion.docx_parser import parse_docx
+    from ingestion.parser import parse_pdf
+
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided.")
         
@@ -478,6 +564,9 @@ async def analyze(
       - Processing time metrics.
     """
     # ── Preflight check ─────────────────────────────────────────────────
+    from llm.chain import run_analysis_pipeline
+    from retrieval.vector_store import get_document_count
+
     doc_count = get_document_count()
     if doc_count == 0:
         raise HTTPException(
@@ -567,6 +656,8 @@ def list_documents() -> dict:
     Return a list of all unique document names currently in the index,
     along with per-document chunk counts.
     """
+    from retrieval.vector_store import get_vector_store
+
     try:
         store = get_vector_store()
         collection = store._collection
@@ -618,6 +709,9 @@ def remove_document(
     Remove all chunks belonging to a specific document and rebuild the
     BM25 index.
     """
+    from retrieval.bm25_retriever import rebuild_bm25_from_vector_store
+    from retrieval.vector_store import delete_document
+
     deleted_count = delete_document(document_name)
 
     if deleted_count == 0:

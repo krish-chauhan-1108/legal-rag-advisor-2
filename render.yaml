@@ -21,3 +21,5 @@ services:
         value: models/gemini-embedding-2
       - key: DATABASE_URL
         value: sqlite:///./legal.db
+      - key: SEED_UPLOAD_TOKEN
+        sync: false
