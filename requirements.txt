@@ -2,6 +2,7 @@
 fastapi>=0.115.6
 uvicorn[standard]>=0.34.0
 python-multipart>=0.0.20
+SQLAlchemy>=2.0.36
 
 # === LangChain Ecosystem ===
 langchain>=0.3.14
@@ -9,6 +10,7 @@ langchain-core>=0.3.52
 langchain-community>=0.3.14
 langchain-ollama>=0.3.2
 langchain-google-genai>=2.0.0
+langchain-chroma>=0.2.1
 
 # === Document Parsing ===
 pypdf>=5.1.0
@@ -33,4 +35,3 @@ tenacity>=9.0.0
 scikit-learn>=1.6.1
 numpy
 datasets>=3.5.0
-

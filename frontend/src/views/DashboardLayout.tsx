@@ -14,7 +14,8 @@ export const DashboardLayout: React.FC = () => {
 
   useEffect(() => {
     const checkHealth = () => {
-      fetch('http://localhost:8000/health')
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      fetch(`${apiUrl}/health`)
         .then(r => r.ok ? r.json() : null)
         .then(data => {
           if (data) setHealth({ isOnline: data.status === 'healthy', docCount: data.documents_indexed, modelUsed: 'Deep thinking' });
@@ -28,8 +29,8 @@ export const DashboardLayout: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const handleNewChat = () => {
-    const newId = createChat();
+  const handleNewChat = async () => {
+    const newId = await createChat();
     navigate(`/chat/${newId}`);
   };
 

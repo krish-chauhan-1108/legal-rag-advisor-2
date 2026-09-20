@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-import { Send, Paperclip, Loader2, FileText, X, Scale, ChevronDown, Check } from 'lucide-react';
+import { Send, Paperclip, FileText, X, Scale, ChevronDown, Check } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MessageBubble } from '../components/Chat/MessageBubble';
-import type { ChatMessage } from '../types';
 import { useChats } from '../context/ChatContext';
 
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
@@ -104,7 +103,7 @@ export const ChatView: React.FC = () => {
     
     let targetId = id;
     if (!targetId) {
-      targetId = createChat();
+      targetId = await createChat();
       navigate(`/chat/${targetId}`, { replace: true });
     }
 

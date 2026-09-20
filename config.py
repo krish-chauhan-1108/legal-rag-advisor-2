@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.25  # Increased slightly to prevent repetitive hallucination loops
     gemini_api_key: str = ""
     gemini_api_key_fallback: str = ""
+    gemini_api_key_3: str = ""
+    gemini_api_key_4: str = ""
     ollama_base_url: str = "http://localhost:11434"
 
     # ── Embeddings (Google Gemini API)
@@ -79,7 +81,9 @@ class Settings(BaseSettings):
     port: int = 8000
     
     # ── Database ────────────────────────────────────────────────────────────
-    database_url: str = "sqlite:///./app.db"
+    # Keep the local SQLite database in the project directory by default. The
+    # value can be overridden with DATABASE_URL on Render or another host.
+    database_url: str = "sqlite:///./legal.db"
 
     # ── Helpers ─────────────────────────────────────────────────────────────
     def ensure_directories(self) -> None:

@@ -6,21 +6,33 @@ interface DocumentInfo {
   chunk_count: number;
 }
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 export const KnowledgeBaseView: React.FC = () => {
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchDocuments = () => {
-    fetch('http://localhost:8000/api/documents')
+    fetch(`${API_URL}/api/documents`)
     .then(r => r.ok ? r.json() : { documents: [] })
     .then(data => setDocuments(data.documents || []))
-    .catch(e => console.error(e));
+    .catch(e => {
+      console.error(e);
+      setError("Cannot connect to the server to fetch documents.");
+    });
   };
 
   useEffect(() => {
     fetchDocuments();
   }, []);
+
+  const extractErrorMsg = (detail: any, defaultMsg: string) => {
+    if (!detail) return defaultMsg;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) return detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ');
+    return JSON.stringify(detail);
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -35,7 +47,7 @@ export const KnowledgeBaseView: React.FC = () => {
     setError(null);
     
     try {
-      const res = await fetch('http://localhost:8000/api/ingest', {
+      const res = await fetch(`${API_URL}/api/ingest`, {
         method: 'POST',
         body: formData
       });
@@ -43,11 +55,11 @@ export const KnowledgeBaseView: React.FC = () => {
       if (res.ok) {
         fetchDocuments();
       } else {
-        const data = await res.json();
-        setError(data.detail || "Upload failed");
+        const data = await res.json().catch(() => ({}));
+        setError(extractErrorMsg(data.detail, "Upload failed due to a server error."));
       }
     } catch (err) {
-      setError("Network error during upload");
+      setError("Network error: Cannot connect to the server during upload.");
     } finally {
       setIsUploading(false);
       e.target.value = ''; // reset input
@@ -58,14 +70,18 @@ export const KnowledgeBaseView: React.FC = () => {
     if (!confirm(`Are you sure you want to delete ${docName} from your Knowledge Base?`)) return;
     
     try {
-      const res = await fetch(`http://localhost:8000/api/documents?document_name=${encodeURIComponent(docName)}`, {
+      const res = await fetch(`${API_URL}/api/documents?document_name=${encodeURIComponent(docName)}`, {
         method: 'DELETE'
       });
       if (res.ok) {
         fetchDocuments();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(extractErrorMsg(data.detail, "Deletion failed due to a server error."));
       }
     } catch (e) {
       console.error(e);
+      setError("Network error: Cannot connect to the server to delete document.");
     }
   };
 

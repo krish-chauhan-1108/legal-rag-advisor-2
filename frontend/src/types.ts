@@ -16,11 +16,16 @@ export interface ApplicableLaw {
 export interface StructuredAnalysis {
   is_conversational: boolean;
   conversational_reply: string | null;
-  summary: string;
+  requires_sources: boolean;
+  suggest_lawyer: boolean;
+  general_analysis: string;
+  situation_meaning: string;
+  bail_status: string;
+  next_24_hours: string[];
+  rights: string[];
+  handling_authority: string;
   applicable_laws: ApplicableLaw[];
-  immediate_actions: string[];
-  bail_info: string;
-  detailed_analysis: string;
+  relevant_source_indices: number[];
 }
 
 export interface ChatMessage {

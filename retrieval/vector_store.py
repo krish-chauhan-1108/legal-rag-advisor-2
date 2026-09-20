@@ -26,7 +26,9 @@ _embedding_function = None
 _vector_store = None
 
 
-def _get_embedding_function():
+from key_manager import get_current_key, rotate_key
+
+def _get_embedding_function(force_reinit=False):
     """
     Build and cache the embedding function using Google Gemini.
 
@@ -36,60 +38,25 @@ def _get_embedding_function():
         A LangChain GoogleGenerativeAIEmbeddings instance.
     """
     global _embedding_function
-    if _embedding_function is not None:
+    if _embedding_function is not None and not force_reinit:
         return _embedding_function
 
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
+    current_key = get_current_key()
     _embedding_function = GoogleGenerativeAIEmbeddings(
         model=settings.embedding_model,
-        google_api_key=settings.gemini_api_key,
+        google_api_key=current_key,
     )
     logger.info(
         "Initialized Google Gemini embeddings: model=%s",
         settings.embedding_model,
     )
 
-    return _embedding_function
-
-
-API_KEYS = [
-    "AQ.Ab8RN6KV0Q69xyi9xW3Vx4j-fSr4dXEeSKyMDHZUnkiFkf9jHA",
-    "AQ.Ab8RN6IKHKIm28twQxKmGPpx_ZutYURxWZxA7jiVnOf1whcMPQ"
-]
-_current_key_idx = 0
-
-def rotate_api_key() -> bool:
-    """
-    Swap the Gemini API key with the next fallback key and re-initialize the embedding function.
-    Returns True if successfully rotated, False otherwise.
-    """
-    global _embedding_function, _vector_store, _current_key_idx
-    
-    _current_key_idx += 1
-    exhausted = False
-    if _current_key_idx >= len(API_KEYS):
-        _current_key_idx = 0
-        exhausted = True
-        
-    logger.info(f"Rotating API key to fallback #{_current_key_idx + 1} due to rate limits...")
-    
-    # Update the active key
-    settings.gemini_api_key = API_KEYS[_current_key_idx]
-    
-    from langchain_google_genai import GoogleGenerativeAIEmbeddings
-    
-    # Re-initialize the embedding function with the new key
-    _embedding_function = GoogleGenerativeAIEmbeddings(
-        model=settings.embedding_model,
-        google_api_key=settings.gemini_api_key,
-    )
-    
-    # If the vector store is already initialized, update its internal embedding function
     if _vector_store is not None:
         _vector_store._embedding_function = _embedding_function
-        
-    return not exhausted
+
+    return _embedding_function
 
 
 def get_vector_store():
@@ -136,9 +103,20 @@ def add_documents(documents: list[Document]) -> list[str]:
         The list of IDs assigned by ChromaDB.
     """
     store = get_vector_store()
-    ids = store.add_documents(documents)
-    logger.info("Added %d documents to the vector store.", len(ids))
-    return ids
+    
+    while True:
+        try:
+            ids = store.add_documents(documents)
+            logger.info("Added %d documents to the vector store.", len(ids))
+            return ids
+        except Exception as e:
+            err_str = str(e).lower()
+            if "429" in err_str or "quota" in err_str or "exhausted" in err_str or "rate limit" in err_str:
+                logger.warning("Rate limit hit during document embedding. Attempting key rotation...")
+                if rotate_key():
+                    _get_embedding_function(force_reinit=True)
+                    continue
+            raise e
 
 
 def similarity_search(
@@ -161,13 +139,23 @@ def similarity_search(
     store = get_vector_store()
     k = k or settings.retrieval_top_k
 
-    results = store.similarity_search(
-        query=query,
-        k=k,
-        filter=filter_dict,
-    )
-    logger.debug("Dense search returned %d results for query: '%.60s…'", len(results), query)
-    return results
+    while True:
+        try:
+            results = store.similarity_search(
+                query=query,
+                k=k,
+                filter=filter_dict,
+            )
+            logger.debug("Dense search returned %d results for query: '%.60s…'", len(results), query)
+            return results
+        except Exception as e:
+            err_str = str(e).lower()
+            if "429" in err_str or "quota" in err_str or "exhausted" in err_str or "rate limit" in err_str:
+                logger.warning("Rate limit hit during similarity search. Attempting key rotation...")
+                if rotate_key():
+                    _get_embedding_function(force_reinit=True)
+                    continue
+            raise e
 
 
 def similarity_search_with_score(
@@ -184,12 +172,22 @@ def similarity_search_with_score(
     store = get_vector_store()
     k = k or settings.retrieval_top_k
 
-    results = store.similarity_search_with_score(
-        query=query,
-        k=k,
-        filter=filter_dict,
-    )
-    return results
+    while True:
+        try:
+            results = store.similarity_search_with_score(
+                query=query,
+                k=k,
+                filter=filter_dict,
+            )
+            return results
+        except Exception as e:
+            err_str = str(e).lower()
+            if "429" in err_str or "quota" in err_str or "exhausted" in err_str or "rate limit" in err_str:
+                logger.warning("Rate limit hit during similarity_search_with_score. Attempting key rotation...")
+                if rotate_key():
+                    _get_embedding_function(force_reinit=True)
+                    continue
+            raise e
 
 
 def get_document_count() -> int:

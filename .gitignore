@@ -19,6 +19,8 @@ build/
 data/
 chroma_db/
 vector_db/
+*.db
+Microsoft/
 
 # OS Files
 .DS_Store

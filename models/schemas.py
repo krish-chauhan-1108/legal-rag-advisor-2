@@ -80,6 +80,24 @@ class IngestionResponse(BaseModel):
 # =============================================================================
 
 
+class ChatSessionCreate(BaseModel):
+    title: str
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    role: str
+    content: str
+    structured_content: Optional[dict] = None
+    sources: Optional[list] = None
+    created_at: str
+
+class ChatSessionResponse(BaseModel):
+    id: str
+    title: str
+    user_email: str
+    messages: list[ChatMessageResponse] = []
+    created_at: str
+    updated_at: str
 
 
 class AnalysisRequest(BaseModel):
@@ -90,6 +108,10 @@ class AnalysisRequest(BaseModel):
         min_length=3,
         max_length=2000,
         description="The legal question or analysis request from the user.",
+    )
+    chat_id: Optional[str] = Field(
+        default=None,
+        description="Optional: ID of the chat session to persist messages.",
     )
     document_filter: Optional[str] = Field(
         default=None,
@@ -149,6 +171,7 @@ class StructuredAnalysis(BaseModel):
     conversational_reply: Optional[str] = Field(default=None, description="The conversational reply if is_conversational is True")
     requires_sources: bool = Field(default=True, description="False if this is a simple yes/no, conversational, or general query where explicitly showing legal sources is unnecessary.")
     suggest_lawyer: bool = Field(default=False, description="True if the user's situation is severe or complex enough that they should consult a real lawyer.")
+    general_analysis: str = Field(default="", description="1. General Legal Analysis (Use this for general questions like 'What is the difference between X and Y'). Leave empty if it's a specific personal situation.")
     situation_meaning: str = Field(default="", description="1. What the situation means")
     bail_status: str = Field(default="", description="2. Bail Status")
     next_24_hours: list[str] = Field(default_factory=list, description="3. What to do in the next 24 hours (Step-by-Step)")

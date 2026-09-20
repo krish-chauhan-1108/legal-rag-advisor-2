@@ -33,6 +33,7 @@ from retrieval.hybrid_retriever import hybrid_retrieve, _is_junk_form
 from retrieval.bm25_retriever import ensure_bm25_ready
 from retrieval.reranker import filter_chunks_by_case, rerank
 from utils.logger import get_logger
+from key_manager import get_current_key, rotate_key
 
 logger = get_logger(__name__)
 
@@ -46,7 +47,7 @@ def _clean_text(text: str | None) -> str:
 # ─── LLM cache ─────────────────────────────────────────────────────────────
 _llms = {}
 
-def _get_llm(model_preference: str = "deep"):
+def _get_llm(model_preference: str = "deep", force_reinit: bool = False):
     """
     Lazily initialize and cache the LLM instances.
 
@@ -59,15 +60,16 @@ def _get_llm(model_preference: str = "deep"):
     else:
         target_model = settings.llm_model # defaults to gemma-4-31b-it
 
-    if target_model in _llms:
+    if target_model in _llms and not force_reinit:
         return _llms[target_model], target_model
 
     from langchain_google_genai import ChatGoogleGenerativeAI
 
+    current_key = get_current_key()
     _llms[target_model] = ChatGoogleGenerativeAI(
         model=target_model,
         temperature=settings.llm_temperature,
-        google_api_key=settings.gemini_api_key,
+        google_api_key=current_key,
         max_output_tokens=8192,
     )
     logger.info(
@@ -188,13 +190,21 @@ async def run_analysis_pipeline(
 
     messages.append(HumanMessage(content=full_prompt))
 
-    try:
-        structured_llm = llm.with_structured_output(StructuredAnalysis)
-        response = await structured_llm.ainvoke(messages)
-        structured_analysis = response
-    except Exception as exc:
-        logger.error("LLM generation failed: %s", exc)
-        raise RuntimeError(f"LLM generation failed: {exc}") from exc
+    while True:
+        try:
+            structured_llm = llm.with_structured_output(StructuredAnalysis)
+            response = await structured_llm.ainvoke(messages)
+            structured_analysis = response
+            break
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "429" in err_str or "quota" in err_str or "exhausted" in err_str or "rate limit" in err_str:
+                logger.warning("Rate limit hit during LLM generation. Attempting key rotation...")
+                if rotate_key():
+                    llm, actual_model_used = _get_llm(model_preference, force_reinit=True)
+                    continue
+            logger.error("LLM generation failed: %s", exc)
+            raise RuntimeError(f"LLM generation failed: {exc}") from exc
 
     # ── Post-Processing: Fix "(not in context)" sections ────────────
     original_reranked_len = len(reranked)

@@ -34,7 +34,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Depends
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -42,6 +42,10 @@ from sqlalchemy.orm import Session
 
 print("[Progress] Loading config and settings...")
 from config import settings
+
+from database import engine, get_db, Base
+import models.db_models as db_models
+import json
 
 print("[Progress] Loading chunking module (Spacy/NLTK might load here)...")
 from ingestion.chunker import chunk_document
@@ -61,6 +65,9 @@ from models.schemas import (
     AnalysisResponse,
     HealthResponse,
     IngestionResponse,
+    ChatSessionCreate,
+    ChatSessionResponse,
+    ChatMessageResponse,
 )
 from retrieval.bm25_retriever import rebuild_bm25_from_vector_store
 
@@ -70,8 +77,8 @@ from retrieval.vector_store import (
     delete_document,
     get_document_count,
     get_vector_store,
-    rotate_api_key,
 )
+from key_manager import rotate_key
 
 print("[Progress] Loading Logger...")
 from utils.logger import get_logger
@@ -105,6 +112,9 @@ async def lifespan(app: FastAPI):
     settings.ensure_directories()
     print("[Progress] Ensuring STATIC_DIR exists...")
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    
+    print("[Progress] Initializing SQLite database...")
+    db_models.Base.metadata.create_all(bind=engine)
 
     print("[Progress] Rebuilding BM25 index on startup...")
     try:
@@ -139,8 +149,8 @@ app = FastAPI(
 # ── CORS — allow all origins during development ────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:5174"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -156,6 +166,85 @@ async def serve_frontend():
     """Serve the single-page web UI at the root URL."""
     return FileResponse(STATIC_DIR / "index.html")
 
+
+def get_current_user_email(x_user_email: str = Header("anonymous")) -> str:
+    return x_user_email
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Chat Sessions API
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/chats", response_model=list[ChatSessionResponse], tags=["Chats"])
+def get_chats(user_email: str = Depends(get_current_user_email), db: Session = Depends(get_db)):
+    sessions = db.query(db_models.ChatSession).filter(db_models.ChatSession.user_email == user_email).order_by(db_models.ChatSession.updated_at.desc()).all()
+    res = []
+    for s in sessions:
+        msgs = db.query(db_models.ChatMessage).filter(db_models.ChatMessage.session_id == s.id).order_by(db_models.ChatMessage.created_at.asc()).all()
+        parsed_msgs = []
+        for m in msgs:
+            parsed_msgs.append({
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "structured_content": json.loads(m.structured_content) if m.structured_content else None,
+                "sources": json.loads(m.sources) if m.sources else None,
+                "created_at": m.created_at.isoformat()
+            })
+        res.append({
+            "id": s.id,
+            "title": s.title,
+            "user_email": s.user_email,
+            "messages": parsed_msgs,
+            "created_at": s.created_at.isoformat(),
+            "updated_at": s.updated_at.isoformat()
+        })
+    return res
+
+@app.post("/api/chats", response_model=ChatSessionResponse, tags=["Chats"])
+def create_chat(chat_in: ChatSessionCreate, user_email: str = Depends(get_current_user_email), db: Session = Depends(get_db)):
+    import uuid
+    new_id = str(uuid.uuid4())
+    db_session = db_models.ChatSession(
+        id=new_id,
+        user_email=user_email,
+        title=chat_in.title
+    )
+    db.add(db_session)
+    
+    # Add initial trana message
+    init_msg = db_models.ChatMessage(
+        session_id=new_id,
+        role="assistant",
+        content="I'm Trana—your friendly legal assistant. How can I help you today?"
+    )
+    db.add(init_msg)
+    
+    db.commit()
+    db.refresh(db_session)
+    return {
+        "id": db_session.id,
+        "title": db_session.title,
+        "user_email": db_session.user_email,
+        "messages": [{
+            "id": init_msg.id,
+            "role": init_msg.role,
+            "content": init_msg.content,
+            "created_at": init_msg.created_at.isoformat()
+        }],
+        "created_at": db_session.created_at.isoformat(),
+        "updated_at": db_session.updated_at.isoformat()
+    }
+
+@app.delete("/api/chats/{chat_id}", tags=["Chats"])
+def delete_chat(chat_id: str, user_email: str = Depends(get_current_user_email), db: Session = Depends(get_db)):
+    db_session = db.query(db_models.ChatSession).filter(db_models.ChatSession.id == chat_id, db_models.ChatSession.user_email == user_email).first()
+    if not db_session:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    db.query(db_models.ChatMessage).filter(db_models.ChatMessage.session_id == chat_id).delete()
+    db.delete(db_session)
+    db.commit()
+    return {"status": "success"}
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Health Check
@@ -276,7 +365,7 @@ def ingest_document(
                 
                 if is_recoverable:
                     logger.warning(f"API Error at batch {i}: {exc}")
-                    if not rotated_this_batch and rotate_api_key():
+                    if not rotated_this_batch and rotate_key():
                         logger.warning(f"API key rotated successfully. Retrying immediately...")
                         rotated_this_batch = True
                         time.sleep(2)
@@ -369,7 +458,9 @@ def extract_document(
     summary="Ask the AI Legal Advisor a question",
 )
 async def analyze(
-    request: AnalysisRequest
+    request: AnalysisRequest,
+    user_email: str = Depends(get_current_user_email),
+    db: Session = Depends(get_db)
 ) -> AnalysisResponse:
     """
     Submit a legal question and receive a structured, grounded analysis.
@@ -397,6 +488,27 @@ async def analyze(
             ),
         )
 
+    # Save user message to DB if chat_id is provided
+    if request.chat_id:
+        # Check if chat exists and belongs to the user
+        chat_session = db.query(db_models.ChatSession).filter(
+            db_models.ChatSession.id == request.chat_id,
+            db_models.ChatSession.user_email == user_email
+        ).first()
+        if chat_session:
+            user_msg = db_models.ChatMessage(
+                session_id=request.chat_id,
+                role="user",
+                content=request.query
+            )
+            db.add(user_msg)
+            
+            # Update chat title if it's "New Chat"
+            if chat_session.title == "New Chat":
+                chat_session.title = request.query[:30] + ("..." if len(request.query) > 30 else "")
+            
+            db.commit()
+
     # ── Run the full RAG pipeline ───────────────────────────────────────
     print(f"[Progress] Running analysis pipeline for query: '{request.query}'...")
     try:
@@ -416,6 +528,27 @@ async def analyze(
             status_code=500,
             detail=f"An unexpected error occurred: {exc}",
         )
+
+    # Save assistant message to DB
+    if request.chat_id:
+        chat_session = db.query(db_models.ChatSession).filter(
+            db_models.ChatSession.id == request.chat_id,
+            db_models.ChatSession.user_email == user_email
+        ).first()
+        if chat_session:
+            structured_json = response.analysis.model_dump_json()
+            sources_json = json.dumps([s.model_dump() for s in response.sources])
+            
+            assistant_msg = db_models.ChatMessage(
+                session_id=request.chat_id,
+                role="assistant",
+                content="", # We use structured_content instead
+                structured_content=structured_json,
+                sources=sources_json
+            )
+            db.add(assistant_msg)
+            chat_session.updated_at = db_models.datetime.utcnow()
+            db.commit()
 
     return response
 

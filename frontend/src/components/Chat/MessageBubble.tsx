@@ -10,7 +10,6 @@ interface MessageBubbleProps {
 
 const ExpandableQuote: React.FC<{ quote: string }> = ({ quote }) => {
   const [expanded, setExpanded] = useState(false);
-  const isLong = quote.length > 150; 
 
   return (
     <div 
@@ -83,6 +82,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, animate =
                    <div className="text-gray-800">{message.structuredContent.conversational_reply}</div>
                 ) : (
                   <>
+                    {/* General Analysis */}
+                    {message.structuredContent.general_analysis && (
+                      <div>
+                        <div className="flex items-center gap-2 text-lg font-bold text-gray-800 mb-3 border-b-2 border-gray-100 pb-2">
+                          <FileText size={20} className="text-blue-600" /> Legal Analysis
+                        </div>
+                        <div className="text-gray-700 leading-relaxed bg-blue-50 px-4 py-3 rounded-xl border border-blue-100 whitespace-pre-wrap">
+                          {message.structuredContent.general_analysis}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Situation Meaning */}
                     {message.structuredContent.situation_meaning && (
                       <div>
