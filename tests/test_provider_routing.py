@@ -77,3 +77,55 @@ def test_groq_json_mode_handles_wrapped_structured_content(monkeypatch):
     assert result.general_analysis == "A concise answer."
     assert captured["response_format"] == {"type": "json_object"}
     assert captured["include_reasoning"] is False
+
+
+def test_provider_payload_normalizes_nullable_law_fields(monkeypatch):
+    record = _record("groq-key", "groq", "openai/gpt-oss-120b")
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {
+                "choices": [{
+                    "message": {
+                        "content": json.dumps({
+                            "is_conversational": False,
+                            "applicable_laws": [{
+                                "act": "Bharatiya Nyaya Sanhita, 2023",
+                                "code": "BNS",
+                                "section": 1,
+                                "quote": None,
+                                "explanation": "Defines the short title and commencement.",
+                                "verified": None,
+                            }],
+                        }),
+                    }
+                }]
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(chain.httpx, "AsyncClient", FakeClient)
+
+    result = asyncio.run(chain._invoke_openai_compatible(
+        record,
+        [SystemMessage(content="Return valid JSON."), HumanMessage(content="Explain this.")],
+        timeout=2,
+    ))
+
+    assert result.applicable_laws[0].section == "1"
+    assert result.applicable_laws[0].quote == ""
+    assert result.applicable_laws[0].verified is False

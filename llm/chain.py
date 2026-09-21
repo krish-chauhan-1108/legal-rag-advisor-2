@@ -97,6 +97,57 @@ def _message_text(message) -> str:
     return str(content)
 
 
+def _normalize_analysis_payload(payload: object) -> dict:
+    """Make common provider JSON conventions safe for our Pydantic schema."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("provider response JSON was not an object")
+    normalized = dict(payload)
+
+    for field_name in (
+        "general_analysis",
+        "situation_meaning",
+        "bail_status",
+        "handling_authority",
+    ):
+        if normalized.get(field_name) is None:
+            normalized[field_name] = ""
+    for field_name in ("is_conversational", "requires_sources", "suggest_lawyer"):
+        if normalized.get(field_name) is None:
+            normalized[field_name] = False
+    for field_name in ("next_24_hours", "rights", "applicable_laws", "relevant_source_indices"):
+        if normalized.get(field_name) is None:
+            normalized[field_name] = []
+
+    laws = normalized.get("applicable_laws", [])
+    if isinstance(laws, dict):
+        laws = [laws]
+    normalized_laws = []
+    for law in laws if isinstance(laws, list) else []:
+        if not isinstance(law, dict):
+            continue
+        normalized_law = dict(law)
+        for field_name in (
+            "act",
+            "code",
+            "section",
+            "quote",
+            "explanation",
+            "quote_status",
+        ):
+            value = normalized_law.get(field_name)
+            if value is None:
+                normalized_law[field_name] = ""
+            elif not isinstance(value, str):
+                normalized_law[field_name] = str(value)
+        for field_name in ("verified",):
+            if normalized_law.get(field_name) is None:
+                normalized_law[field_name] = False
+        normalized_laws.append(normalized_law)
+    normalized["applicable_laws"] = normalized_laws
+    return normalized
+
+
 def _parse_structured_analysis_content(content) -> StructuredAnalysis:
     """Parse provider JSON while tolerating harmless prose/fence wrappers."""
 
@@ -114,7 +165,7 @@ def _parse_structured_analysis_content(content) -> StructuredAnalysis:
     if start < 0:
         raise ValueError("provider response did not contain a JSON object")
     payload, _ = decoder.raw_decode(text[start:])
-    return StructuredAnalysis.model_validate(payload)
+    return StructuredAnalysis.model_validate(_normalize_analysis_payload(payload))
 
 
 async def _invoke_openai_compatible(record, messages, timeout: float | None) -> StructuredAnalysis:
