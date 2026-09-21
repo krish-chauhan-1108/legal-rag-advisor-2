@@ -54,7 +54,10 @@ def _get_llm(model_preference: str = "deep", force_reinit: bool = False):
         model=target_model,
         temperature=settings.llm_temperature,
         google_api_key=key_record.secret,
-        max_output_tokens=8192,
+        # The response is a compact structured analysis. A large output budget
+        # makes Gemma spend much longer producing JSON and increases the risk of
+        # repetitive generations without improving the user-facing answer.
+        max_output_tokens=3072 if model_preference == "deep" else 1024,
     )
     logger.info(
         "LLM initialized: provider=google_genai, model=%s, temp=%.2f",

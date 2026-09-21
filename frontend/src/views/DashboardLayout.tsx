@@ -18,6 +18,7 @@ export const DashboardLayout: React.FC = () => {
   useEffect(() => {
     let active = true;
     let requestInFlight = false;
+    let consecutiveHealthFailures = 0;
 
     const handleApiOnline = (event: Event) => {
       const sourceRegistryReady = (event as CustomEvent<{ sourceRegistryReady?: boolean }>).detail?.sourceRegistryReady;
@@ -49,10 +50,14 @@ export const DashboardLayout: React.FC = () => {
             status: data.status === 'healthy' ? 'online' : 'offline',
             sourceRegistryReady: data.source_registry_ready !== false,
           });
+          consecutiveHealthFailures = 0;
         }
       } catch {
+        consecutiveHealthFailures += 1;
         if (active) {
-          setHealth(current => current.status === 'online' ? current : { ...current, status: 'offline' });
+          setHealth(current => current.status === 'online' || consecutiveHealthFailures < 2
+            ? current
+            : { ...current, status: 'offline' });
         }
       } finally {
         requestInFlight = false;
@@ -60,7 +65,7 @@ export const DashboardLayout: React.FC = () => {
     };
 
     checkHealth();
-    const interval = setInterval(checkHealth, 30000);
+    const interval = setInterval(checkHealth, 10000);
     return () => {
       active = false;
       clearInterval(interval);
