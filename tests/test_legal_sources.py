@@ -1,5 +1,5 @@
 from legal_sources import get_registry
-from llm.chain import _verify_law_candidates
+from llm.chain import _sanitize_analysis, _verify_law_candidates
 from models.schemas import ApplicableLaw, StructuredAnalysis
 
 
@@ -49,3 +49,15 @@ def test_unknown_citation_cannot_become_verified() -> None:
 
     assert sources == []
     assert analysis.applicable_laws == []
+
+
+def test_model_repetition_is_compacted_before_display() -> None:
+    analysis = StructuredAnalysis(
+        situation_meaning="Same same same same same same.",
+        next_24_hours=["Call a lawyer now now now.", "Call a lawyer now now now."],
+    )
+
+    cleaned = _sanitize_analysis(analysis)
+
+    assert cleaned.situation_meaning == "Same."
+    assert cleaned.next_24_hours == ["Call a lawyer now."]

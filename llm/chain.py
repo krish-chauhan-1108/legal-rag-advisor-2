@@ -7,6 +7,8 @@ then populated only from :mod:`legal_sources.registry`.
 
 from __future__ import annotations
 
+import asyncio
+import re
 import time
 from typing import Optional
 
@@ -32,6 +34,40 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 _llms = {}
+_REPEATED_WORDS = re.compile(r"\b(\w+)(?:\s+\1){2,}\b", re.IGNORECASE)
+
+
+def _clean_model_text(value: str, max_length: int = 1200) -> str:
+    """Remove obvious provider repetition before content reaches the user."""
+
+    cleaned = re.sub(r"\s+", " ", value or "").strip()
+    cleaned = _REPEATED_WORDS.sub(r"\1", cleaned)
+    return cleaned[:max_length].rstrip()
+
+
+def _sanitize_analysis(analysis: StructuredAnalysis) -> StructuredAnalysis:
+    """Bound structured fields so malformed long generations remain readable."""
+
+    for field_name in (
+        "conversational_reply",
+        "general_analysis",
+        "situation_meaning",
+        "bail_status",
+        "handling_authority",
+    ):
+        value = getattr(analysis, field_name)
+        if isinstance(value, str):
+            setattr(analysis, field_name, _clean_model_text(value))
+
+    for field_name in ("next_24_hours", "rights"):
+        cleaned_values = []
+        for value in getattr(analysis, field_name)[:5]:
+            cleaned = _clean_model_text(value, max_length=400)
+            if cleaned and cleaned not in cleaned_values:
+                cleaned_values.append(cleaned)
+        setattr(analysis, field_name, cleaned_values)
+
+    return analysis
 
 
 def _get_llm(model_preference: str = "deep", force_reinit: bool = False):
@@ -181,21 +217,54 @@ async def run_analysis_pipeline(
         )
     messages.append(HumanMessage(content=prompt))
 
-    llm, actual_model_used, key_id = _get_llm(model_preference)
+    active_model_preference = model_preference
+    deep_fallback_used = False
+    deadline = (
+        time.monotonic() + settings.analysis_deadline_seconds
+        if model_preference == "deep"
+        else None
+    )
+    llm, actual_model_used, key_id = _get_llm(active_model_preference)
     quick_key_attempts = 0
     while True:
         try:
             structured_llm = llm.with_structured_output(StructuredAnalysis)
-            response = await structured_llm.ainvoke(messages)
+            timeout = None
+            if deadline is not None:
+                remaining = max(0.1, deadline - time.monotonic())
+                timeout = min(settings.deep_timeout_seconds, remaining) if active_model_preference == "deep" else remaining
+            invoke = structured_llm.ainvoke(messages)
+            response = await asyncio.wait_for(invoke, timeout=timeout) if timeout else await invoke
             structured_analysis = (
                 response
                 if isinstance(response, StructuredAnalysis)
                 else StructuredAnalysis.model_validate(response)
             )
+            structured_analysis = _sanitize_analysis(structured_analysis)
             record_provider_attempt(key_id, actual_model_used, "success")
-            if model_preference == "quick":
+            if active_model_preference == "quick":
                 clear_quick_temporarily_unavailable()
             break
+        except asyncio.TimeoutError as exc:
+            record_provider_attempt(key_id, actual_model_used, "failure", exc)
+            if model_preference == "deep" and active_model_preference == "deep" and not deep_fallback_used:
+                logger.warning(
+                    "Deep Thinking exceeded %.1fs; falling back to Gemini Flash before the %.1fs deadline.",
+                    settings.deep_timeout_seconds,
+                    settings.analysis_deadline_seconds,
+                )
+                if is_quick_temporarily_unavailable():
+                    raise RuntimeError(
+                        "Deep Thinking exceeded its response deadline and Quick Thinking is temporarily unavailable."
+                    ) from exc
+                active_model_preference = "quick"
+                deep_fallback_used = True
+                llm, actual_model_used, key_id = _get_llm("quick", force_reinit=True)
+                continue
+            logger.error("LLM generation exceeded the response deadline.")
+            raise RuntimeError(
+                "The analysis exceeded the 20-second response deadline. Please try again."
+            ) from exc
         except Exception as exc:
             quota_error = is_quota_error(exc)
             record_provider_attempt(
@@ -206,7 +275,7 @@ async def run_analysis_pipeline(
             )
             if quota_error:
                 logger.warning("Rate limit hit during LLM generation. Attempting key rotation...")
-                if model_preference == "quick":
+                if active_model_preference == "quick":
                     quick_key_attempts += 1
                     if quick_key_attempts >= max(1, get_active_key_count()):
                         mark_quick_temporarily_unavailable()
@@ -216,7 +285,7 @@ async def run_analysis_pipeline(
                         ) from exc
                 if rotate_key():
                     llm, actual_model_used, key_id = _get_llm(
-                        model_preference,
+                        active_model_preference,
                         force_reinit=True,
                     )
                     continue

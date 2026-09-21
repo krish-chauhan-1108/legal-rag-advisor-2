@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     # Or use Gemini models like "gemini-2.5-flash".
     llm_model: str = "gemma-4-31b-it"
     llm_temperature: float = 0.25  # Increased slightly to prevent repetitive hallucination loops
+    deep_timeout_seconds: float = 8.0
+    analysis_deadline_seconds: float = 20.0
     gemini_api_key: str = ""
     gemini_api_key_fallback: str = ""
     gemini_api_key_3: str = ""
