@@ -7,6 +7,20 @@ interface MessageBubbleProps {
   message: ChatMessage;
 }
 
+const formatMessageTime = (value: string): string | null => {
+  // Older API records contain UTC timestamps without an offset.
+  const normalizedValue = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
+  const date = new Date(normalizedValue);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return `${new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date)} IST`;
+};
+
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const isUser = message.role === 'user';
@@ -39,7 +53,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
     ? 'Quick Thinking'
     : 'Deep Thinking';
   const formattedMessageTime = message.created_at
-    ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(message.created_at))
+    ? formatMessageTime(message.created_at)
     : null;
 
   const formatDocName = (name: string) => {
