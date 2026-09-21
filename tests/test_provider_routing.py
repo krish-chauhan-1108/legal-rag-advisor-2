@@ -1,3 +1,7 @@
+import asyncio
+import json
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from key_manager import APIKeyRecord
 from llm import chain
 
@@ -28,3 +32,48 @@ def test_quick_routes_prioritize_gpt_oss_then_llama(monkeypatch):
     )
 
     assert [record.id for record in chain._quick_routes()] == ["oss", "nemotron", "llama"]
+
+
+def test_groq_json_mode_handles_wrapped_structured_content(monkeypatch):
+    record = _record("groq-key", "groq", "openai/gpt-oss-120b")
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            payload = {"is_conversational": False, "general_analysis": "A concise answer."}
+            return {
+                "choices": [{
+                    "message": {
+                        "content": "Here is the requested JSON:\n" + json.dumps(payload),
+                    }
+                }]
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, headers, json):
+            captured.update(json)
+            return FakeResponse()
+
+    monkeypatch.setattr(chain.httpx, "AsyncClient", FakeClient)
+
+    result = asyncio.run(chain._invoke_openai_compatible(
+        record,
+        [SystemMessage(content="Return valid JSON."), HumanMessage(content="Explain this.")],
+        timeout=2,
+    ))
+
+    assert result.general_analysis == "A concise answer."
+    assert captured["response_format"] == {"type": "json_object"}
+    assert captured["include_reasoning"] is False

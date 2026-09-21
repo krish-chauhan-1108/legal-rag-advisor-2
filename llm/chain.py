@@ -97,6 +97,26 @@ def _message_text(message) -> str:
     return str(content)
 
 
+def _parse_structured_analysis_content(content) -> StructuredAnalysis:
+    """Parse provider JSON while tolerating harmless prose/fence wrappers."""
+
+    if isinstance(content, list):
+        content = "".join(
+            str(item.get("text", "")) if isinstance(item, dict) else str(item)
+            for item in content
+        )
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+
+    decoder = json.JSONDecoder()
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("provider response did not contain a JSON object")
+    payload, _ = decoder.raw_decode(text[start:])
+    return StructuredAnalysis.model_validate(payload)
+
+
 async def _invoke_openai_compatible(record, messages, timeout: float | None) -> StructuredAnalysis:
     base_url = _provider_url(record)
     if not base_url:
@@ -107,6 +127,14 @@ async def _invoke_openai_compatible(record, messages, timeout: float | None) -> 
         "temperature": settings.llm_temperature,
         "max_tokens": 1024,
     }
+    if record.provider == "groq":
+        # GPT-OSS exposes reasoning separately. JSON Object Mode keeps the
+        # assistant content parseable across Groq responses, while disabling
+        # the reasoning field prevents it from being mixed into the answer.
+        payload["response_format"] = {"type": "json_object"}
+        payload["include_reasoning"] = False
+        if _model_family(record.model) == "gpt-oss":
+            payload["reasoning_effort"] = "low"
     headers = {"Authorization": f"Bearer {record.secret}", "Content-Type": "application/json"}
     request_timeout = timeout or 20.0
     async with httpx.AsyncClient(timeout=request_timeout) as client:
@@ -114,14 +142,9 @@ async def _invoke_openai_compatible(record, messages, timeout: float | None) -> 
     if response.status_code >= 400:
         raise RuntimeError(f"{record.provider} HTTP {response.status_code}: {response.text[:300]}")
     body = response.json()
-    content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
-    if isinstance(content, list):
-        content = "".join(str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in content)
-    content = str(content).strip()
-    if content.startswith("```"):
-        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.IGNORECASE | re.DOTALL).strip()
     try:
-        return StructuredAnalysis.model_validate(json.loads(content))
+        content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return _parse_structured_analysis_content(content)
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         raise RuntimeError(f"{record.provider} returned invalid structured analysis JSON.") from exc
 
