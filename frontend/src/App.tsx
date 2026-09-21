@@ -4,6 +4,7 @@ import { ChatView } from './views/ChatView';
 import { AccountView } from './views/AccountView';
 import { LegalPage } from './views/LegalPage';
 import { HomePage } from './views/HomePage';
+import { AdminView } from './views/AdminView';
 
 const AppContent = () => {
   return (
@@ -16,6 +17,7 @@ const AppContent = () => {
         <Route index element={<ChatView />} />
         <Route path="chat/:id" element={<ChatView />} />
         <Route path="account" element={<AccountView />} />
+        <Route path="admin" element={<AdminView />} />
       </Route>
     </Routes>
   );

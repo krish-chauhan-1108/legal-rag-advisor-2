@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Float
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from datetime import datetime
 import uuid
 from database import Base
@@ -34,3 +34,49 @@ class ChatMessage(Base):
     model_used = Column(String, nullable=True)
     processing_time_seconds = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class GeminiAPIKey(Base):
+    """Encrypted Gemini credentials managed by the admin console."""
+
+    __tablename__ = "gemini_api_keys"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    label = Column(String(120), nullable=False)
+    encrypted_key = Column(Text, nullable=False)
+    fingerprint = Column(String(64), unique=True, index=True, nullable=False)
+    masked_key = Column(String(32), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    rotation_order = Column(Integer, nullable=False, default=0, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
+    last_error_status = Column(String(32), nullable=True)
+    last_error_at = Column(DateTime, nullable=True)
+
+
+class GeminiAPIKeyUsage(Base):
+    """Per-key/model counters in minute and IST-calendar-day buckets."""
+
+    __tablename__ = "gemini_api_key_usage"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    api_key_id = Column(String, ForeignKey("gemini_api_keys.id"), nullable=False, index=True)
+    model = Column(String(160), nullable=False, index=True)
+    bucket_type = Column(String(16), nullable=False)
+    bucket_start = Column(DateTime, nullable=False)
+    total_requests = Column(Integer, nullable=False, default=0)
+    successful_requests = Column(Integer, nullable=False, default=0)
+    failed_requests = Column(Integer, nullable=False, default=0)
+    quota_failures = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "api_key_id",
+            "model",
+            "bucket_type",
+            "bucket_start",
+            name="uq_gemini_key_usage_bucket",
+        ),
+        Index("ix_gemini_key_usage_lookup", "api_key_id", "model", "bucket_type", "bucket_start"),
+    )

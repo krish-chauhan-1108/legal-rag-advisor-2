@@ -66,6 +66,31 @@ Chroma index can be lost after a redeploy or instance replacement. Re-upload
 the knowledge-base documents after such an event, or migrate storage before
 using this for persistent production data.
 
+## 1c. Configure the private admin console
+
+The admin console is available at `/admin` on the Vercel frontend. It requires
+both a verified Google sign-in and an email listed in these Render variables:
+
+- `ADMIN_EMAILS`: comma-separated Google email addresses allowed to manage keys.
+- `API_KEY_ENCRYPTION_KEY`: a Fernet key used to encrypt keys in the hosted database.
+
+Generate the encryption key locally with:
+
+```powershell
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Add both values in Render's **Environment** page, then redeploy. The first
+startup imports any non-empty legacy `GEMINI_API_KEY`,
+`GEMINI_API_KEY_FALLBACK`, `GEMINI_API_KEY_3`, and `GEMINI_API_KEY_4` values
+into the encrypted key pool without duplicating existing fingerprints.
+
+After signing in with an allowlisted account, use **Account → Admin console**
+to add, deactivate, reorder, or delete keys. Raw keys are never returned to
+the frontend. Usage counters measure TRANA's own Gemini provider attempts and
+are separated by key, model, current minute, and IST calendar day; they do not
+include usage made by the same keys elsewhere in Google AI Studio.
+
 ## 2. Point Vercel at the backend
 
 1. Open the existing Vercel project.

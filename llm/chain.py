@@ -34,13 +34,14 @@ from retrieval.bm25_retriever import ensure_bm25_ready
 from retrieval.reranker import filter_chunks_by_case, rerank
 from utils.logger import get_logger
 from key_manager import (
-    AVAILABLE_KEYS,
     QuickModelUnavailableError,
     clear_quick_temporarily_unavailable,
-    get_current_key,
+    get_active_key_count,
+    get_current_key_record,
     is_quota_error,
     is_quick_temporarily_unavailable,
     mark_quick_temporarily_unavailable,
+    record_provider_attempt,
     rotate_key,
 )
 
@@ -69,16 +70,20 @@ def _get_llm(model_preference: str = "deep", force_reinit: bool = False):
     else:
         target_model = settings.llm_model # defaults to gemma-4-31b-it
 
-    if target_model in _llms and not force_reinit:
-        return _llms[target_model], target_model
+    key_record = get_current_key_record()
+    if key_record is None:
+        raise RuntimeError("No active Gemini API keys are configured.")
+    cache_key = (target_model, key_record.id)
+
+    if cache_key in _llms and not force_reinit:
+        return _llms[cache_key], target_model, key_record.id
 
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    current_key = get_current_key()
-    _llms[target_model] = ChatGoogleGenerativeAI(
+    _llms[cache_key] = ChatGoogleGenerativeAI(
         model=target_model,
         temperature=settings.llm_temperature,
-        google_api_key=current_key,
+        google_api_key=key_record.secret,
         max_output_tokens=8192,
     )
     logger.info(
@@ -87,7 +92,7 @@ def _get_llm(model_preference: str = "deep", force_reinit: bool = False):
         settings.llm_temperature,
     )
 
-    return _llms[target_model], target_model
+    return _llms[cache_key], target_model, key_record.id
 
 
 async def run_analysis_pipeline(
@@ -194,7 +199,7 @@ async def run_analysis_pipeline(
     )
 
     # ── Stage 4: LLM Generation ────────────────────────────────────────
-    llm, actual_model_used = _get_llm(model_preference)
+    llm, actual_model_used, key_id = _get_llm(model_preference)
 
     messages = [SystemMessage(content=SYSTEM_PROMPT)]
 
@@ -211,22 +216,30 @@ async def run_analysis_pipeline(
             structured_llm = llm.with_structured_output(StructuredAnalysis)
             response = await structured_llm.ainvoke(messages)
             structured_analysis = response
+            record_provider_attempt(key_id, actual_model_used, "success")
             if model_preference == "quick":
                 clear_quick_temporarily_unavailable()
             break
         except Exception as exc:
-            if is_quota_error(exc):
+            quota_error = is_quota_error(exc)
+            record_provider_attempt(
+                key_id,
+                actual_model_used,
+                "quota" if quota_error else "failure",
+                exc,
+            )
+            if quota_error:
                 logger.warning("Rate limit hit during LLM generation. Attempting key rotation...")
                 if model_preference == "quick":
                     quick_key_attempts += 1
-                    if quick_key_attempts >= max(1, len(AVAILABLE_KEYS)):
+                    if quick_key_attempts >= max(1, get_active_key_count()):
                         mark_quick_temporarily_unavailable()
                         raise QuickModelUnavailableError(
                             "Quick Thinking is temporarily unavailable because Gemini Flash "
                             "has reached the limit on all configured API keys."
                         ) from exc
                 if rotate_key():
-                    llm, actual_model_used = _get_llm(model_preference, force_reinit=True)
+                    llm, actual_model_used, key_id = _get_llm(model_preference, force_reinit=True)
                     continue
             logger.error("LLM generation failed: %s", exc)
             raise RuntimeError(f"LLM generation failed: {exc}") from exc

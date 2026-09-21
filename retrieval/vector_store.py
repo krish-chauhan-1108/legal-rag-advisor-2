@@ -26,7 +26,14 @@ _embedding_function = None
 _vector_store = None
 
 
-from key_manager import get_current_key, rotate_key
+from key_manager import (
+    get_current_key_record,
+    is_quota_error,
+    record_provider_attempt,
+    rotate_key,
+)
+
+_embedding_key_id = None
 
 def _get_embedding_function(force_reinit=False):
     """
@@ -37,17 +44,24 @@ def _get_embedding_function(force_reinit=False):
     Returns:
         A LangChain GoogleGenerativeAIEmbeddings instance.
     """
-    global _embedding_function
-    if _embedding_function is not None and not force_reinit:
+    global _embedding_function, _embedding_key_id
+    current_record = get_current_key_record()
+    if current_record is None:
+        raise RuntimeError("No active Gemini API keys are configured.")
+    if (
+        _embedding_function is not None
+        and not force_reinit
+        and _embedding_key_id == current_record.id
+    ):
         return _embedding_function
 
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-    current_key = get_current_key()
     _embedding_function = GoogleGenerativeAIEmbeddings(
         model=settings.embedding_model,
-        google_api_key=current_key,
+        google_api_key=current_record.secret,
     )
+    _embedding_key_id = current_record.id
     logger.info(
         "Initialized Google Gemini embeddings: model=%s",
         settings.embedding_model,
@@ -107,15 +121,18 @@ def add_documents(documents: list[Document]) -> list[str]:
     while True:
         try:
             ids = store.add_documents(documents)
+            record_provider_attempt(_embedding_key_id, settings.embedding_model, "success")
             logger.info("Added %d documents to the vector store.", len(ids))
             return ids
         except Exception as e:
-            err_str = str(e).lower()
-            if "429" in err_str or "quota" in err_str or "exhausted" in err_str or "rate limit" in err_str:
+            if is_quota_error(e):
+                record_provider_attempt(_embedding_key_id, settings.embedding_model, "quota", e)
                 logger.warning("Rate limit hit during document embedding. Attempting key rotation...")
                 if rotate_key():
                     _get_embedding_function(force_reinit=True)
                     continue
+            else:
+                record_provider_attempt(_embedding_key_id, settings.embedding_model, "failure", e)
             raise e
 
 
@@ -147,14 +164,17 @@ def similarity_search(
                 filter=filter_dict,
             )
             logger.debug("Dense search returned %d results for query: '%.60s…'", len(results), query)
+            record_provider_attempt(_embedding_key_id, settings.embedding_model, "success")
             return results
         except Exception as e:
-            err_str = str(e).lower()
-            if "429" in err_str or "quota" in err_str or "exhausted" in err_str or "rate limit" in err_str:
+            if is_quota_error(e):
+                record_provider_attempt(_embedding_key_id, settings.embedding_model, "quota", e)
                 logger.warning("Rate limit hit during similarity search. Attempting key rotation...")
                 if rotate_key():
                     _get_embedding_function(force_reinit=True)
                     continue
+            else:
+                record_provider_attempt(_embedding_key_id, settings.embedding_model, "failure", e)
             raise e
 
 
@@ -179,14 +199,17 @@ def similarity_search_with_score(
                 k=k,
                 filter=filter_dict,
             )
+            record_provider_attempt(_embedding_key_id, settings.embedding_model, "success")
             return results
         except Exception as e:
-            err_str = str(e).lower()
-            if "429" in err_str or "quota" in err_str or "exhausted" in err_str or "rate limit" in err_str:
+            if is_quota_error(e):
+                record_provider_attempt(_embedding_key_id, settings.embedding_model, "quota", e)
                 logger.warning("Rate limit hit during similarity_search_with_score. Attempting key rotation...")
                 if rotate_key():
                     _get_embedding_function(force_reinit=True)
                     continue
+            else:
+                record_provider_attempt(_embedding_key_id, settings.embedding_model, "failure", e)
             raise e
 
 

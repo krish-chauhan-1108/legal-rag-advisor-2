@@ -1,16 +1,38 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
-import { LogOut, ShieldCheck, UserCircle } from 'lucide-react';
+import { ExternalLink, LogOut, ShieldCheck, UserCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/auth';
+import { getAdminAccess } from '../api/admin';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 export const AccountView: React.FC = () => {
   const navigate = useNavigate();
-  const { user, signIn, signOut } = useAuth();
+  const { credential, user, signIn, signOut } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (!credential) {
+      queueMicrotask(() => {
+        if (active) setIsAdmin(false);
+      });
+      return () => { active = false; };
+    }
+
+    void getAdminAccess(credential)
+      .then((access) => {
+        if (active) setIsAdmin(access.authorized);
+      })
+      .catch(() => {
+        if (active) setIsAdmin(false);
+      });
+
+    return () => { active = false; };
+  }, [credential]);
 
   const handleGoogleSuccess = async (credential?: string) => {
     if (!credential) return;
@@ -51,6 +73,16 @@ export const AccountView: React.FC = () => {
                 <ShieldCheck className="w-5 h-5 flex-shrink-0" />
                 <p>Your chats are associated with this Google account.</p>
               </div>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/admin')}
+                  className="mb-6 flex w-full items-center justify-between rounded-lg border border-gray-200 px-4 py-3 text-left text-sm text-gray-700 transition-colors hover:border-gray-400 hover:bg-gray-50"
+                >
+                  <span className="flex items-center gap-2"><ShieldCheck className="w-4 h-4" /> Admin console</span>
+                  <ExternalLink className="w-4 h-4 text-gray-400" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => { signOut(); navigate('/'); }}

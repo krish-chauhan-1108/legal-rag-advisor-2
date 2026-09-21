@@ -118,6 +118,62 @@ class GoogleAuthResponse(BaseModel):
     user: AuthenticatedUserResponse
 
 
+class AdminAccessResponse(BaseModel):
+    email: str
+    is_admin: bool
+
+
+class AdminAPIKeyCreate(BaseModel):
+    label: str = Field(..., min_length=1, max_length=120)
+    api_key: str = Field(..., min_length=20, max_length=512)
+    is_active: bool = True
+    rotation_order: Optional[int] = Field(default=None, ge=0)
+
+
+class AdminAPIKeyUpdate(BaseModel):
+    label: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    is_active: Optional[bool] = None
+    rotation_order: Optional[int] = Field(default=None, ge=0)
+
+
+class AdminAPIKeyResponse(BaseModel):
+    id: str
+    label: str
+    fingerprint: str
+    masked_key: str
+    is_active: bool
+    rotation_order: int
+    created_at: str
+    updated_at: str
+    last_used_at: Optional[str] = None
+    last_error_status: Optional[str] = None
+    last_error_at: Optional[str] = None
+
+
+class AdminUsageCounts(BaseModel):
+    total_requests: int = 0
+    successful_requests: int = 0
+    failed_requests: int = 0
+    quota_failures: int = 0
+
+
+class AdminUsageRow(BaseModel):
+    api_key_id: str
+    label: str
+    masked_key: str
+    model: str
+    minute: AdminUsageCounts
+    day: AdminUsageCounts
+    all_time: AdminUsageCounts
+
+
+class AdminUsageResponse(BaseModel):
+    timezone: str = "Asia/Kolkata"
+    current_minute_start: str
+    current_day_start: str
+    rows: list[AdminUsageRow] = Field(default_factory=list)
+
+
 class AnalysisRequest(BaseModel):
     """Request body for the ``/api/analyze`` endpoint."""
 

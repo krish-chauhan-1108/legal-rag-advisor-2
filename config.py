@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     gemini_api_key_fallback: str = ""
     gemini_api_key_3: str = ""
     gemini_api_key_4: str = ""
+    # Comma-separated verified Google email addresses allowed to use the
+    # backend administration API.
+    admin_emails: str = ""
+    # Fernet key used to encrypt Gemini API keys persisted in the database.
+    # Generate one with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    api_key_encryption_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
 
     # ── Embeddings (Google Gemini API)

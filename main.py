@@ -32,10 +32,12 @@ from __future__ import annotations
 import shutil
 import secrets
 import time
+from datetime import datetime
 from pathlib import PurePosixPath
 from zipfile import BadZipFile, ZipFile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +46,7 @@ from fastapi.staticfiles import StaticFiles
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 print("[Progress] Loading config and settings...")
 from config import settings
@@ -65,9 +68,23 @@ from models.schemas import (
     ChatMessageResponse,
     GoogleAuthRequest,
     GoogleAuthResponse,
+    AdminAccessResponse,
+    AdminAPIKeyCreate,
+    AdminAPIKeyUpdate,
+    AdminAPIKeyResponse,
+    AdminUsageCounts,
+    AdminUsageResponse,
+    AdminUsageRow,
 )
 from key_manager import (
     QuickModelUnavailableError,
+    IST,
+    _bucket_starts,
+    encryption_is_configured,
+    encrypt_api_key,
+    fingerprint_api_key,
+    initialize_key_store,
+    mask_api_key,
     is_quota_error,
     mark_quick_temporarily_unavailable,
     rotate_key,
@@ -158,6 +175,7 @@ async def lifespan(app: FastAPI):
     print("[Progress] Initializing application database...")
     db_models.Base.metadata.create_all(bind=engine)
     _ensure_chat_message_metadata_columns()
+    initialize_key_store()
 
     print("[Progress] Application startup logic complete.")
     logger.info("Startup complete. Server ready on http://%s:%d", settings.host, settings.port)
@@ -263,6 +281,219 @@ def authenticate_google(auth_in: GoogleAuthRequest, db: Session = Depends(get_db
     db.commit()
     db.refresh(user)
     return {"user": user}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin API: encrypted Gemini keys and provider usage
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _admin_email_set() -> set[str]:
+    return {
+        value.strip().lower()
+        for value in settings.admin_emails.replace(";", ",").split(",")
+        if value.strip()
+    }
+
+
+def get_admin_email(user_email: str = Depends(get_current_user_email)) -> str:
+    """Require a verified Google account listed in ADMIN_EMAILS."""
+    if user_email.strip().lower() not in _admin_email_set():
+        raise HTTPException(status_code=403, detail="This Google account is not authorized for administration.")
+    return user_email
+
+
+def _require_encrypted_key_store() -> None:
+    if not encryption_is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="API key management is not configured. Set API_KEY_ENCRYPTION_KEY on the backend.",
+        )
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _admin_key_response(row: db_models.GeminiAPIKey) -> dict:
+    return {
+        "id": row.id,
+        "label": row.label,
+        "fingerprint": row.fingerprint,
+        "masked_key": row.masked_key,
+        "is_active": row.is_active,
+        "rotation_order": row.rotation_order,
+        "created_at": _iso(row.created_at),
+        "updated_at": _iso(row.updated_at),
+        "last_used_at": _iso(row.last_used_at),
+        "last_error_status": row.last_error_status,
+        "last_error_at": _iso(row.last_error_at),
+    }
+
+
+@app.get("/api/admin/access", response_model=AdminAccessResponse, tags=["Admin"])
+def admin_access(user_email: str = Depends(get_current_user_email)) -> dict:
+    """Return whether the verified Google account is in the admin allowlist."""
+    return {
+        "email": user_email,
+        "is_admin": user_email.strip().lower() in _admin_email_set(),
+    }
+
+
+@app.get("/api/admin/keys", response_model=list[AdminAPIKeyResponse], tags=["Admin"])
+def list_admin_keys(
+    _admin_email: str = Depends(get_admin_email),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    _require_encrypted_key_store()
+    rows = (
+        db.query(db_models.GeminiAPIKey)
+        .order_by(db_models.GeminiAPIKey.rotation_order.asc(), db_models.GeminiAPIKey.created_at.asc())
+        .all()
+    )
+    return [_admin_key_response(row) for row in rows]
+
+
+@app.post("/api/admin/keys", response_model=AdminAPIKeyResponse, status_code=201, tags=["Admin"])
+def create_admin_key(
+    key_in: AdminAPIKeyCreate,
+    _admin_email: str = Depends(get_admin_email),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_encrypted_key_store()
+    secret = key_in.api_key.strip()
+    fingerprint = fingerprint_api_key(secret)
+    if db.query(db_models.GeminiAPIKey).filter(db_models.GeminiAPIKey.fingerprint == fingerprint).first():
+        raise HTTPException(status_code=409, detail="This API key is already configured.")
+
+    if key_in.rotation_order is None:
+        highest_order = db.query(db_models.GeminiAPIKey.rotation_order).order_by(
+            db_models.GeminiAPIKey.rotation_order.desc()
+        ).first()
+        rotation_order = (highest_order[0] + 1) if highest_order else 0
+    else:
+        rotation_order = key_in.rotation_order
+
+    row = db_models.GeminiAPIKey(
+        label=key_in.label.strip(),
+        encrypted_key=encrypt_api_key(secret),
+        fingerprint=fingerprint,
+        masked_key=mask_api_key(secret),
+        is_active=key_in.is_active,
+        rotation_order=rotation_order,
+    )
+    db.add(row)
+    try:
+        db.commit()
+        db.refresh(row)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This API key is already configured.") from exc
+    return _admin_key_response(row)
+
+
+@app.patch("/api/admin/keys/{key_id}", response_model=AdminAPIKeyResponse, tags=["Admin"])
+def update_admin_key(
+    key_id: str,
+    key_in: AdminAPIKeyUpdate,
+    _admin_email: str = Depends(get_admin_email),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_encrypted_key_store()
+    row = db.query(db_models.GeminiAPIKey).filter(db_models.GeminiAPIKey.id == key_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="API key not found.")
+    if key_in.label is not None:
+        row.label = key_in.label.strip()
+    if key_in.is_active is not None:
+        row.is_active = key_in.is_active
+    if key_in.rotation_order is not None:
+        row.rotation_order = key_in.rotation_order
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return _admin_key_response(row)
+
+
+@app.delete("/api/admin/keys/{key_id}", tags=["Admin"])
+def delete_admin_key(
+    key_id: str,
+    _admin_email: str = Depends(get_admin_email),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_encrypted_key_store()
+    row = db.query(db_models.GeminiAPIKey).filter(db_models.GeminiAPIKey.id == key_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="API key not found.")
+    db.query(db_models.GeminiAPIKeyUsage).filter(db_models.GeminiAPIKeyUsage.api_key_id == key_id).delete(
+        synchronize_session=False
+    )
+    db.delete(row)
+    db.commit()
+    return {"status": "success", "id": key_id}
+
+
+def _zero_usage() -> dict[str, int]:
+    return {
+        "total_requests": 0,
+        "successful_requests": 0,
+        "failed_requests": 0,
+        "quota_failures": 0,
+    }
+
+
+@app.get("/api/admin/usage", response_model=AdminUsageResponse, tags=["Admin"])
+def admin_usage(
+    _admin_email: str = Depends(get_admin_email),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_encrypted_key_store()
+    minute_start, day_start = _bucket_starts()
+    keys = db.query(db_models.GeminiAPIKey).order_by(db_models.GeminiAPIKey.rotation_order.asc()).all()
+    usage_rows = db.query(db_models.GeminiAPIKeyUsage).all()
+    models = {settings.embedding_model, "gemini-2.5-flash", settings.llm_model}
+    grouped: dict[tuple[str, str], dict[str, dict[str, int]]] = {}
+    for usage in usage_rows:
+        models.add(usage.model)
+        entry = grouped.setdefault((usage.api_key_id, usage.model), {
+            "minute": _zero_usage(),
+            "day": _zero_usage(),
+            "all_time": _zero_usage(),
+        })
+        targets = []
+        if usage.bucket_type == "minute" and usage.bucket_start == minute_start:
+            targets.append(entry["minute"])
+        if usage.bucket_type == "day":
+            targets.append(entry["all_time"])
+            if usage.bucket_start == day_start:
+                targets.append(entry["day"])
+        for target in targets:
+            target["total_requests"] += usage.total_requests
+            target["successful_requests"] += usage.successful_requests
+            target["failed_requests"] += usage.failed_requests
+            target["quota_failures"] += usage.quota_failures
+
+    result_rows = []
+    for key in keys:
+        for model in sorted(models):
+            counts = grouped.get((key.id, model), {
+                "minute": _zero_usage(),
+                "day": _zero_usage(),
+                "all_time": _zero_usage(),
+            })
+            result_rows.append({
+                "api_key_id": key.id,
+                "label": key.label,
+                "masked_key": key.masked_key,
+                "model": model,
+                **counts,
+            })
+
+    return {
+        "timezone": "Asia/Kolkata",
+        "current_minute_start": f"{minute_start.isoformat()}+05:30",
+        "current_day_start": f"{day_start.isoformat()}+05:30",
+        "rows": result_rows,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -15,6 +15,10 @@ services:
         sync: false
       - key: GEMINI_API_KEY_4
         sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: API_KEY_ENCRYPTION_KEY
+        sync: false
       - key: LLM_MODEL
         value: gemma-4-31b-it
       - key: EMBEDDING_MODEL
