@@ -51,7 +51,6 @@ export function LegalPage() {
           </>
         )}
 
-        <p className="legal-page__footer"><Link to="/privacy">Privacy Policy</Link><span>·</span><Link to="/terms">Terms of Service</Link><span>·</span><Link to="/">Return to TRANA</Link></p>
           <div className="legal-page__footer"><Link to="/privacy">Privacy Policy</Link><span>·</span><Link to="/terms">Terms of Service</Link><span>·</span><Link to="/">Return to TRANA</Link></div>
         </article>
       </div>

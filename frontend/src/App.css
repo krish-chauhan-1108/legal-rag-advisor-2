@@ -97,11 +97,6 @@
   font-size: 0.9rem;
 }
 
-/* The footer is now rendered as a div for the redesigned legal card. */
-.legal-page__card > p.legal-page__footer {
-  display: none;
-}
-
 @media (max-width: 520px) {
   .legal-page__topbar {
     align-items: flex-start;
