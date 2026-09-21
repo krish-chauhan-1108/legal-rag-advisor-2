@@ -416,7 +416,7 @@ def admin_usage(
     minute_start, day_start = _bucket_starts()
     keys = db.query(db_models.GeminiAPIKey).order_by(db_models.GeminiAPIKey.rotation_order.asc()).all()
     usage_rows = db.query(db_models.GeminiAPIKeyUsage).all()
-    models = {settings.embedding_model, "gemini-2.5-flash", settings.llm_model}
+    models = {"gemini-2.5-flash", settings.llm_model}
     grouped: dict[tuple[str, str], dict[str, dict[str, int]]] = {}
     for usage in usage_rows:
         models.add(usage.model)
