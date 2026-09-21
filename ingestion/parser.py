@@ -1,16 +1,15 @@
 """
 PDF Document Parser for the Legal RAG Advisor.
 
-Extracts clean text from uploaded PDF documents using PyPDF as the primary
-engine, with automatic fallback to the ``unstructured`` library for scanned
-or complex-layout PDFs.
+Extracts clean text from uploaded PDF documents using the lightweight PyPDF
+engine. Uploaded documents are ephemeral context only; they are not indexed.
 
 Design decisions
 ----------------
 - PyPDF is fast and reliable for digitally-born PDFs (the vast majority of
   modern legal agreements).
-- ``unstructured`` handles OCR-heavy or multi-column layouts but is slower
-  and has heavier dependencies, so it's used only as a fallback.
+- OCR and vector indexing are intentionally outside this service's runtime
+  path so the Render deployment stays small and predictable.
 - Page boundaries are preserved so downstream chunking can attach page
   numbers to each chunk.
 """
@@ -71,64 +70,13 @@ def parse_pdf_with_pypdf(file_path: Path) -> PageTextList:
     return pages
 
 
-def parse_pdf_with_unstructured(file_path: Path) -> PageTextList:
-    """
-    Fallback parser using the ``unstructured`` library.
-
-    This handles scanned PDFs and complex multi-column layouts by leveraging
-    layout detection and optional OCR.
-
-    Args:
-        file_path: Path to the PDF file.
-
-    Returns:
-        Same format as :func:`parse_pdf_with_pypdf`.
-
-    Raises:
-        FileNotFoundError: If *file_path* does not exist.
-        RuntimeError: If ``unstructured`` fails.
-    """
-    if not file_path.exists():
-        raise FileNotFoundError(f"PDF not found: {file_path}")
-
-    logger.info("Parsing PDF with unstructured (fallback): %s", file_path.name)
-
-    try:
-        from unstructured.partition.pdf import partition_pdf
-
-        elements = partition_pdf(str(file_path))
-    except Exception as exc:
-        raise RuntimeError(
-            f"unstructured could not parse '{file_path.name}': {exc}"
-        ) from exc
-
-    # Group elements by page.
-    page_map: dict[int, list[str]] = {}
-    for el in elements:
-        page_num = getattr(el.metadata, "page_number", 1) or 1
-        page_map.setdefault(page_num, []).append(str(el))
-
-    pages: PageTextList = [
-        {"page_number": pn, "text": "\n".join(texts)}
-        for pn, texts in sorted(page_map.items())
-    ]
-
-    logger.info(
-        "unstructured extracted %d pages from '%s'.",
-        len(pages),
-        file_path.name,
-    )
-    return pages
-
-
 def parse_pdf(file_path: Path) -> PageTextList:
     """
-    High-level parsing entry point with automatic fallback.
+    High-level lightweight parsing entry point.
 
-    Strategy:
-      1. Try PyPDF first (fast, lightweight).
-      2. If PyPDF produces very little text (< 100 chars total), assume the
-         PDF is scanned/complex and fall back to ``unstructured``.
+    Scanned PDFs may produce little or no text and should be uploaded only
+    after OCR has been performed elsewhere. Keeping OCR out of the API avoids
+    loading a large document-processing stack for every chat worker.
 
     Args:
         file_path: Path to the PDF document.
@@ -136,19 +84,4 @@ def parse_pdf(file_path: Path) -> PageTextList:
     Returns:
         Per-page extracted text.
     """
-    pages = parse_pdf_with_pypdf(file_path)
-
-    total_chars = sum(len(p["text"]) for p in pages)
-    if total_chars < 100:
-        logger.warning(
-            "PyPDF extracted only %d chars from '%s'; falling back to unstructured.",
-            total_chars,
-            file_path.name,
-        )
-        try:
-            pages = parse_pdf_with_unstructured(file_path)
-        except Exception as exc:
-            logger.error("Fallback parser also failed: %s", exc)
-            # Return whatever PyPDF managed to get.
-
-    return pages
+    return parse_pdf_with_pypdf(file_path)

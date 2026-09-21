@@ -8,7 +8,7 @@ produce self-documenting OpenAPI specs.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # =============================================================================
@@ -189,13 +189,13 @@ class AnalysisRequest(BaseModel):
     )
     document_filter: Optional[str] = Field(
         default=None,
-        description="Optional: restrict retrieval to a specific document name.",
+        description="Deprecated compatibility field; normal analysis no longer uses local retrieval.",
     )
     top_k: Optional[int] = Field(
         default=None,
         ge=1,
         le=50,
-        description="Override the default number of chunks to retrieve before reranking.",
+        description="Deprecated compatibility field; normal analysis no longer retrieves chunks.",
     )
 
     model_preference: Optional[str] = Field(
@@ -209,11 +209,11 @@ class AnalysisRequest(BaseModel):
 
 
 class SourceChunk(BaseModel):
-    """A single source chunk surfaced alongside the analysis."""
+    """A verified legal source or legacy uploaded-document source."""
 
     content: str = Field(
         ...,
-        description="Text content of the retrieved chunk.",
+        description="Text content of the source.",
     )
     document_name: str = Field(
         ...,
@@ -225,19 +225,47 @@ class SourceChunk(BaseModel):
     )
     relevance_score: float = Field(
         default=0.0,
-        description="Relevance score from the reranker (0–1).",
+        description="Legacy ranking score; verified registry sources use 0.0.",
     )
     page_number: Optional[int] = Field(
         default=None,
         description="Page number in the original PDF.",
     )
+    act: Optional[str] = Field(default=None, description="Full name of the legal Act.")
+    code: Optional[str] = Field(default=None, description="Short legal code, such as BNS, BNSS, or BSA.")
+    subsection: Optional[str] = Field(default=None, description="Subsection within the cited section.")
+    exact_text: Optional[str] = Field(default=None, description="Exact text from the verified source registry.")
+    quote: str = Field(default="", description="Backend-populated exact wording; never trusted from the LLM.")
+    verified: bool = Field(default=False, description="Whether the source text was resolved from the backend registry.")
+    source_url: Optional[str] = Field(default=None, description="Authoritative source URL.")
+    source_version: Optional[str] = Field(default=None, description="Version of the authoritative source.")
+    source_hash: Optional[str] = Field(default=None, description="SHA-256 hash of the exact source text.")
+    quote_status: str = Field(default="unverified", description="backend_verified or unverified.")
 
 
 class ApplicableLaw(BaseModel):
+    act: str = Field(default="", description="The Act name or legal code as returned by the model.")
     code: str = Field(default="", description="The legal code, e.g. BNS, BNSS")
     section: str = Field(default="", description="The exact section and sub-section")
-    quote: str = Field(default="", description="Exact wording or excerpt")
+    subsection: Optional[str] = Field(default=None, description="The subsection, when separately identified.")
+    quote: str = Field(default="", description="Backend-populated exact wording; never trusted from the LLM")
     explanation: str = Field(default="", description="Simple explanation of this section")
+    exact_text: Optional[str] = Field(default=None, description="Exact text from the verified source registry")
+    source_url: Optional[str] = Field(default=None, description="Authoritative source URL")
+    source_version: Optional[str] = Field(default=None, description="Version of the authoritative source")
+    source_hash: Optional[str] = Field(default=None, description="SHA-256 hash of exact_text")
+    quote_status: str = Field(default="unverified", description="backend_verified or unverified")
+    verified: bool = Field(default=False, description="Whether exact_text was resolved from the backend registry")
+
+    @model_validator(mode="after")
+    def synchronize_act_and_code(self) -> "ApplicableLaw":
+        """Accept either model naming convention without discarding its value."""
+
+        if not self.code and self.act:
+            self.code = self.act
+        elif not self.act and self.code:
+            self.act = self.code
+        return self
 
 class StructuredAnalysis(BaseModel):
     """The structured JSON payload returned by the LLM."""
@@ -252,7 +280,7 @@ class StructuredAnalysis(BaseModel):
     rights: list[str] = Field(default_factory=list, description="4. Your Rights")
     handling_authority: str = Field(default="", description="5. Which Authority handles this?")
     applicable_laws: list[ApplicableLaw] = Field(default_factory=list, description="List of applicable laws")
-    relevant_source_indices: list[int] = Field(default_factory=list, description="List of source chunk indices (1-based, e.g. [1, 3]) from the provided context that were ACTUALLY relevant. Exclude irrelevant chunks.")
+    relevant_source_indices: list[int] = Field(default_factory=list, description="Deprecated legacy chunk indices.")
 
 class AnalysisResponse(BaseModel):
     """Structured response from the ``/api/analyze`` endpoint."""
@@ -267,7 +295,7 @@ class AnalysisResponse(BaseModel):
     )
     sources: list[SourceChunk] = Field(
         default_factory=list,
-        description="Ranked source chunks that grounded the analysis.",
+        description="Verified legal sources returned alongside the analysis.",
     )
     model_used: str = Field(
         default="",
@@ -275,7 +303,7 @@ class AnalysisResponse(BaseModel):
     )
     processing_time_seconds: float = Field(
         default=0.0,
-        description="Wall-clock time for the full retrieval + generation pipeline.",
+        description="Wall-clock time for direct generation and source verification.",
     )
 
 
@@ -288,5 +316,6 @@ class HealthResponse(BaseModel):
 
     status: str = "healthy"
     version: str = "1.0.0"
+    source_registry_ready: bool = False
     documents_indexed: int = 0
     vector_store_ready: bool = False

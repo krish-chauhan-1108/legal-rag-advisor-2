@@ -3,13 +3,70 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import { Send, Paperclip, FileText, X, Scale, AlertTriangle } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
-import type { ChatMessage, ChatSession, StructuredAnalysis } from '../types';
+import type { ApplicableLaw, ChatMessage, ChatSession, StructuredAnalysis } from '../types';
 import { authHeaders, useAuth } from '../auth/auth';
 
 const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 // Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
 const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
+
+const VERIFIED_QUOTE_STATUSES = new Set(['backend_verified', 'verified', 'source_verified']);
+
+const isVerifiedLaw = (law: ApplicableLaw): boolean => {
+  const status = law.quote_status?.trim().toLowerCase();
+  return law.verified === true && !!status && VERIFIED_QUOTE_STATUSES.has(status);
+};
+
+const getVerifiedText = (law: ApplicableLaw): string | null => {
+  if (!isVerifiedLaw(law)) return null;
+  const text = law.exact_text ?? law.quote ?? law.content;
+  return typeof text === 'string' && text.trim() ? text.trim() : null;
+};
+
+const formatSection = (section?: string | null, subsection?: string | null): string => {
+  if (!section) return subsection ? `(${subsection})` : '';
+  return subsection ? `${section}(${subsection})` : section;
+};
+
+const formatSourceReference = (law: ApplicableLaw): string | null => {
+  if (!isVerifiedLaw(law)) return null;
+
+  const act = law.act ?? law.code;
+  const section = formatSection(law.section, law.subsection);
+  const reference = [act, section].filter(Boolean).join(' — ');
+  if (!reference) return null;
+
+  if (law.source_url && /^https?:\/\//i.test(law.source_url)) {
+    return `[${reference}](${law.source_url})`;
+  }
+  return reference;
+};
+
+const formatLegalLaw = (law: ApplicableLaw): string => {
+  const title = [law.act ?? law.code, formatSection(law.section, law.subsection)]
+    .filter(Boolean)
+    .join(' — ') || 'Applicable law';
+  const verifiedText = getVerifiedText(law);
+  const parts = [`### ${title}`];
+
+  if (verifiedText) {
+    parts.push(`**Verified statutory text**\n\n> ${verifiedText.replace(/\n/g, '\n> ')}`);
+  }
+
+  if (law.explanation?.trim()) {
+    parts.push(`**Explanation**\n\n${law.explanation.trim()}`);
+  }
+
+  const sourceReference = formatSourceReference(law);
+  if (sourceReference) {
+    parts.push(`**Verified source:** ${sourceReference}`);
+  } else {
+    parts.push('**Source status**\n\n*Exact statutory wording could not be verified from the available source.*');
+  }
+
+  return parts.join('\n\n');
+};
 
 const formatAnalysis = (analysis: unknown): string => {
   if (typeof analysis === 'string') return analysis;
@@ -30,10 +87,7 @@ const formatAnalysis = (analysis: unknown): string => {
   }
   if (result.handling_authority) sections.push(`## Relevant Authority\n${result.handling_authority}`);
   if (result.applicable_laws?.length) {
-    const laws = result.applicable_laws.map(law => {
-      const title = [law.code, law.section].filter(Boolean).join(' — ');
-      return `### ${title || 'Applicable law'}\n${law.explanation || law.quote || ''}`;
-    });
+    const laws = result.applicable_laws.map(formatLegalLaw);
     sections.push(`## Applicable Laws\n${laws.join('\n\n')}`);
   }
   if (result.suggest_lawyer) {

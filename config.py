@@ -8,7 +8,6 @@ Now updated to use the Google Gemini API (supporting Gemma and Gemini models).
 """
 
 from pathlib import Path
-from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -47,33 +46,18 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
 
     # ── Embeddings (Google Gemini API)
-    embedding_model: str = "models/gemini-embedding-2"
-    embedding_dimensions: int = 768
+    # Exact statutory text comes from legal_sources/corpus.json, not embeddings.
 
     # ── Chunking ────────────────────────────────────────────────────────────
     # For highly precise legal retrieval, smaller chunks are better to capture specific clauses
-    chunk_size_tokens: int = 400
-    chunk_overlap_tokens: int = 100
-    tiktoken_encoding: str = "cl100k_base"
 
     # ── Retrieval ───────────────────────────────────────────────────────────
-    retrieval_top_k: int = 20         # Initial broad retrieval
-    rerank_top_n: int = 8             # After reranking
-    bm25_weight: float = 0.4          # Weight in ensemble (dense = 1 - this)
-    dense_weight: float = 0.6
-    bm25_enabled: bool = True
-    bm25_max_docs: int = 50000
-    bm25_max_chars_per_doc: int = 5000
-    bm25_page_size: int = 1000
 
     # ── Re-ranking (local cross-encoder) ────────────────────────────────────
     # Setting an invalid model name forces the system to instantly fall back to the 
     # blazing fast TF-IDF local reranker instead of grinding the CPU.
-    rerank_model: str = "TF-IDF-FAST-FALLBACK"
 
     # ── Storage ─────────────────────────────────────────────────────────────
-    chroma_persist_dir: str = "./data/chroma_db"
-    chroma_collection_name: str = "legal_documents_multilingual_v2"
     upload_dir: str = "./data/uploads"
 
     # ── Logging ─────────────────────────────────────────────────────────────
@@ -90,12 +74,10 @@ class Settings(BaseSettings):
     # Keep the local SQLite database in the project directory by default. The
     # value can be overridden with DATABASE_URL on Render or another host.
     database_url: str = "sqlite:///./legal.db"
-    seed_upload_token: str = ""
 
     # ── Helpers ─────────────────────────────────────────────────────────────
     def ensure_directories(self) -> None:
         """Create required data directories if they don't exist."""
-        Path(self.chroma_persist_dir).mkdir(parents=True, exist_ok=True)
         Path(self.upload_dir).mkdir(parents=True, exist_ok=True)
 
 

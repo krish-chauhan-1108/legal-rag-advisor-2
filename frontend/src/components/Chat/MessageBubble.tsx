@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Scale, ChevronDown, ChevronUp, Clock, Cpu, CalendarClock } from 'lucide-react';
 import { marked } from 'marked';
-import type { ChatMessage } from '../../types';
+import type { ChatMessage, SourceChunk } from '../../types';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -19,6 +19,45 @@ const formatMessageTime = (value: string): string | null => {
     minute: '2-digit',
     hour12: true,
   }).format(date)} IST`;
+};
+
+const VERIFIED_QUOTE_STATUSES = new Set(['backend_verified', 'verified', 'source_verified']);
+
+const isVerifiedSource = (source: SourceChunk): boolean => {
+  const status = source.quote_status?.trim().toLowerCase();
+  return source.verified === true && !!status && VERIFIED_QUOTE_STATUSES.has(status);
+};
+
+const getVerifiedText = (source: SourceChunk): string | null => {
+  if (!isVerifiedSource(source)) return null;
+  const text = source.exact_text ?? source.quote ?? source.content;
+  return typeof text === 'string' && text.trim() ? text.trim() : null;
+};
+
+const formatDocName = (name?: string) => {
+  if (!name) return 'Legal source';
+  if (name.includes('::')) {
+    const parts = name.split('::');
+    return `Case Document: ${parts[parts.length - 1]}`;
+  }
+  return name;
+};
+
+const formatSection = (section?: string, subsection?: string | null): string => {
+  if (!section) return subsection ? `(${subsection})` : '';
+  return subsection ? `${section}(${subsection})` : section;
+};
+
+const formatCitationTitle = (source: SourceChunk): string => {
+  const act = source.act ?? source.code ?? source.document_name;
+  const section = formatSection(source.section, source.subsection);
+  return [act, section].filter(Boolean).join(' — ') || formatDocName(source.document_name);
+};
+
+const formatQuoteStatus = (source: SourceChunk): string => {
+  if (isVerifiedSource(source)) return 'Verified source';
+  if (source.quote_status === 'not_found') return 'Source not found';
+  return 'Unverified reference';
 };
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
@@ -56,14 +95,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
     ? formatMessageTime(message.created_at)
     : null;
 
-  const formatDocName = (name: string) => {
-    if (name.includes('::')) {
-      const parts = name.split('::');
-      return `Case Document: ${parts[parts.length - 1]}`;
-    }
-    return name;
-  };
-
   return (
     <div className={`message-bubble flex w-full mb-6 ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div className={`message-bubble__row flex max-w-[85%] ${isUser ? 'flex-row-reverse' : 'flex-row'} gap-4`}>
@@ -100,9 +131,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                 <div className="mt-3 bg-[#E2E8F0] border border-[#CBD5E1] rounded-xl shadow-sm w-full max-w-4xl overflow-hidden flex flex-col animate-slide-down-fade">
                   {message.sources.map((source, idx) => (
                     <div key={idx} className={`p-4 ${idx !== 0 ? 'border-t border-[#CBD5E1]' : ''}`}>
-                      <div className="mb-2">
+                      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
                         <span className="font-bold text-[#0F172A] flex items-center gap-1.5 text-sm break-words">
-                          📄 {formatDocName(source.document_name)}
+                          📄 {formatCitationTitle(source)}
+                        </span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${isVerifiedSource(source) ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                          {formatQuoteStatus(source)}
                         </span>
                       </div>
                       {source.section && source.section !== 'General' && (
@@ -110,9 +144,38 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                           Section: {source.section} {source.page_number ? `(Pg. ${source.page_number})` : ''}
                         </div>
                       )}
-                      <div className="text-slate-700 text-xs leading-relaxed max-h-32 overflow-y-auto custom-scrollbar pr-2">
-                        {source.content}
-                      </div>
+                      {source.explanation && (
+                        <div className="mb-3 text-slate-700 text-xs leading-relaxed">
+                          <div className="mb-1 font-semibold text-slate-500">Explanation</div>
+                          {source.explanation}
+                        </div>
+                      )}
+                      {getVerifiedText(source) ? (
+                        <div className="text-slate-700 text-xs leading-relaxed max-h-40 overflow-y-auto custom-scrollbar pr-2">
+                          <div className="mb-1 font-semibold text-emerald-800">Verified statutory text</div>
+                          <div className="whitespace-pre-wrap">{getVerifiedText(source)}</div>
+                        </div>
+                      ) : source.exact_text ?? source.quote ?? source.content ? (
+                        <div className="text-slate-700 text-xs leading-relaxed max-h-32 overflow-y-auto custom-scrollbar pr-2">
+                          <div className="mb-1 font-semibold text-slate-500">Source excerpt</div>
+                          <div className="whitespace-pre-wrap">{source.exact_text ?? source.quote ?? source.content}</div>
+                        </div>
+                      ) : !source.explanation ? (
+                        <div className="text-xs italic text-slate-500">
+                          Exact statutory wording could not be verified from the available source.
+                        </div>
+                      ) : null}
+                      {(source.source_url || source.source_version || source.source_hash) && (
+                        <div className="mt-3 flex flex-col gap-1 text-[11px] text-slate-500">
+                          {source.source_url && /^https?:\/\//i.test(source.source_url) && (
+                            <a href={source.source_url} target="_blank" rel="noreferrer" className="font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900">
+                              Open official source
+                            </a>
+                          )}
+                          {source.source_version && <span>Version: {source.source_version}</span>}
+                          {source.source_hash && <span className="break-all">Source hash: {source.source_hash}</span>}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

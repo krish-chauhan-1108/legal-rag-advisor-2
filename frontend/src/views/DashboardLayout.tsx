@@ -15,7 +15,7 @@ export const DashboardLayout: React.FC = () => {
   const location = useLocation();
   const { credential, user } = useAuth();
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
-  const [health, setHealth] = useState<{ status: ApiStatus; docCount: number }>({ status: 'checking', docCount: 0 });
+  const [health, setHealth] = useState<{ status: ApiStatus; sourceRegistryReady: boolean }>({ status: 'checking', sourceRegistryReady: false });
   const [chats, setChats] = useState<ChatSession[]>([]);
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export const DashboardLayout: React.FC = () => {
         if (active) {
           setHealth({
             status: data.status === 'healthy' ? 'online' : 'offline',
-            docCount: Number(data.documents_indexed) || 0,
+            sourceRegistryReady: data.source_registry_ready !== false,
           });
         }
       } catch {
@@ -189,7 +189,7 @@ export const DashboardLayout: React.FC = () => {
           </button>
           
           <div className="mt-4 px-2">
-            <SystemStatus status={health.status} docCount={health.docCount} onRetry={() => window.location.reload()} />
+        <SystemStatus status={health.status} sourceRegistryReady={health.sourceRegistryReady} onRetry={() => window.location.reload()} />
           </div>
         </div>
       </aside>

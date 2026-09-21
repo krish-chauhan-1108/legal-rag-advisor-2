@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "corpus_version": "2023-12-25-gazette-samples",
+  "description": "Verified Section 1(1) samples from the official 25 December 2023 Gazette publications stored in this repository. Expand only from reviewed authoritative source text.",
+  "records": [
+    {
+      "act": "Bharatiya Nyaya Sanhita, 2023",
+      "code": "BNS",
+      "section": "1(1)",
+      "subsection": "1",
+      "heading": "Short title, commencement and application",
+      "exact_text": "This Act may be called the Bharatiya Nyaya Sanhita, 2023.",
+      "source_url": "https://www.indiacode.nic.in/bitstream/123456789/20062/1/a202345.pdf",
+      "source_version": "2023-12-25-gazette",
+      "source_hash": "f56984893ce894e8acc61b21f1ecc1be09f3b100799fcb23e894c095a4ac8f8e"
+    },
+    {
+      "act": "Bharatiya Nagarik Suraksha Sanhita, 2023",
+      "code": "BNSS",
+      "section": "1(1)",
+      "subsection": "1",
+      "heading": "Short title, extent and commencement",
+      "exact_text": "This Act may be called the Bharatiya Nagarik Suraksha Sanhita, 2023.",
+      "source_url": "https://www.indiacode.nic.in/bitstream/123456789/21544/1/the_bharatiya_nagarik_suraksha_sanhita%2C_2023.pdf",
+      "source_version": "2023-12-25-gazette",
+      "source_hash": "f52eb18706864d6bda248ab4015003439a8fa9c05f2744c11fff2ce175e1f7f7"
+    },
+    {
+      "act": "Bharatiya Sakshya Adhiniyam, 2023",
+      "code": "BSA",
+      "section": "1(1)",
+      "subsection": "1",
+      "heading": "Short title, application and commencement",
+      "exact_text": "This Act may be called the Bharatiya Sakshya Adhiniyam, 2023.",
+      "source_url": "https://www.indiacode.nic.in/bitstream/123456789/20063/1/a2023-47.pdf",
+      "source_version": "2023-12-25-gazette",
+      "source_hash": "1f667e0ee9ce5350481c4b39d7cf9f97808cc2b731af6b871bdcbc2a46aadfd2"
+    }
+  ]
+}

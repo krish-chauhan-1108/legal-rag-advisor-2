@@ -1,110 +1,61 @@
 # Free deployment checklist
 
-The repository is prepared for a free Render backend and Vercel frontend.
+TRANA uses direct Gemini analysis. The normal chat path does not load a local
+vector database, embeddings, BM25, or a reranker.
 
 ## 1. Deploy the backend on Render
 
-1. Open Render Dashboard and choose **New → Blueprint**.
-2. Connect GitHub when prompted and authorize Render for the repository.
-3. Select `krish-chauhan-1108/legal-rag-advisor-2` and branch `main`.
-4. Review the service from `render.yaml` and apply the Blueprint.
-5. In the service's **Environment** page, fill the four secret values:
-   - `GEMINI_API_KEY`
-   - `GEMINI_API_KEY_FALLBACK`
-   - `GEMINI_API_KEY_3`
-   - `GEMINI_API_KEY_4`
-6. Save changes and wait for the deploy to finish.
-7. Open `https://<your-render-service>.onrender.com/health` and confirm it returns
-   a healthy JSON response.
+1. Open Render Dashboard and choose **New -> Blueprint**.
+2. Connect GitHub and select `krish-chauhan-1108/legal-rag-advisor-2` on `main`.
+3. Review `render.yaml` and apply the Blueprint.
+4. In the service Environment page, set the Gemini key variables you use:
+   `GEMINI_API_KEY`, `GEMINI_API_KEY_FALLBACK`, `GEMINI_API_KEY_3`, and
+   `GEMINI_API_KEY_4`.
+5. Set `GOOGLE_CLIENT_ID` to the OAuth web-client ID used by the frontend.
+6. Open `/health` and confirm `status` is `healthy` and
+   `source_registry_ready` is `true`.
 
-## 1a. Import the existing document index
+The old `/api/ingest`, `/api/documents`, and seed-import endpoints are retained
+only as compatibility routes and return `410 Gone`. They do not initialize the
+old RAG stack.
 
-The actual RAG index is `data/chroma_db`; `legal.db` only stores chat/session
-metadata. To import the current local snapshot:
+## 2. Configure durable chat history
 
-1. In Render, set a long random `SEED_UPLOAD_TOKEN` environment variable.
-2. Locally run:
+Set `DATABASE_URL` in Render to a hosted PostgreSQL connection string. SQLite
+on the free Render filesystem is ephemeral and should only be used for local
+testing.
 
-   ```powershell
-   .\scripts\create_seed_archive.ps1
-   ```
-
-   This creates `deployment-seed.zip` from `legal.db`, `data/chroma_db`, and
-   any saved PDFs under `data/uploads`. The archive is intentionally ignored by
-   Git and must not be committed.
-3. Upload it to the deployed service:
-
-   ```powershell
-   curl.exe -X POST `
-     -H "X-Seed-Token: YOUR_SEED_UPLOAD_TOKEN" `
-     -F "archive=@deployment-seed.zip" `
-     https://<your-render-service>.onrender.com/api/admin/import-seed
-   ```
-
-4. Restart the Render service, then check `/health` to confirm the process is
-   healthy. Use `/api/documents` to inspect the
-   imported index to load and verify the documents/chunks.
-
-This is a snapshot import, not durable storage. Render's free filesystem can
-still be reset when the service is replaced. Keep the ZIP privately so it can
-be uploaded again if needed.
-
-## 1b. Configure Google accounts and durable chat history
-
-TRANA verifies Google ID tokens and stores chat sessions by verified email.
-Set these variables in Render:
-
-- `GOOGLE_CLIENT_ID`: the Google OAuth web-client ID.
-- `DATABASE_URL`: a PostgreSQL connection string, preferably the provider's
-  pooled/session connection for Render.
-
-Set the same client ID in Vercel as `VITE_GOOGLE_CLIENT_ID`, and add the Vercel
-production URL to the OAuth client's authorized JavaScript origins.
-
-The free Render filesystem is ephemeral. SQLite, uploaded files, and the local
-Chroma index can be lost after a redeploy or instance replacement. Re-upload
-the knowledge-base documents after such an event, or migrate storage before
-using this for persistent production data.
-
-## 1c. Configure the private admin console
+## 3. Configure the private admin console
 
 The admin console is available at `/admin` on the Vercel frontend. It requires
-both a verified Google sign-in and an email listed in these Render variables:
+a verified Google sign-in and an email listed in `ADMIN_EMAILS`.
 
-- `ADMIN_EMAILS`: comma-separated Google email addresses allowed to manage keys.
-- `API_KEY_ENCRYPTION_KEY`: a Fernet key used to encrypt keys in the hosted database.
-
-Generate the encryption key locally with:
+Also set `API_KEY_ENCRYPTION_KEY` in Render. Generate one locally with:
 
 ```powershell
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Add both values in Render's **Environment** page, then redeploy. The first
-startup imports any non-empty legacy `GEMINI_API_KEY`,
-`GEMINI_API_KEY_FALLBACK`, `GEMINI_API_KEY_3`, and `GEMINI_API_KEY_4` values
-into the encrypted key pool without duplicating existing fingerprints.
+The service imports any configured legacy Gemini variables into the encrypted
+key pool without duplicating existing fingerprints. Usage counters track
+TRANA's provider attempts by key, model, minute, and IST day; they do not show
+usage made by the same keys elsewhere in Google AI Studio.
 
-After signing in with an allowlisted account, use **Account → Admin console**
-to add, deactivate, reorder, or delete keys. Raw keys are never returned to
-the frontend. Usage counters measure TRANA's own Gemini provider attempts and
-are separated by key, model, current minute, and IST calendar day; they do not
-include usage made by the same keys elsewhere in Google AI Studio.
+## 4. Point Vercel at the backend
 
-## 2. Point Vercel at the backend
+1. In Vercel project settings, set `VITE_API_URL` to the Render service URL
+   without a trailing slash for Production and Preview.
+2. Redeploy. Vite embeds this value during the build.
+3. Sign in, open chat, and confirm the backend health indicator is ready.
 
-1. Open the existing Vercel project.
-2. Go to **Settings → Environment Variables**.
-3. Add or update `VITE_API_URL` with the Render service URL, without a trailing
-   slash, for Production and Preview.
-4. Trigger a new deployment from the Vercel **Deployments** page. Vite embeds
-   this value during the build, so changing the variable alone does not update
-   an already-built deployment.
-5. Open the Vercel URL and verify the app loads, documents can be uploaded,
-   and a chat request reaches the backend.
+## 5. Exact legal-source behavior
 
-## 3. First-use order
+The model may identify a likely Act and section, but it never supplies
+authoritative quotation text. The backend clears model-generated quotes and
+hydrates exact wording only when the citation exists in
+`legal_sources/corpus.json`, whose records are hash-validated at startup.
 
-After deployment, import the prepared seed archive before
-asking a document-grounded question. The backend intentionally rejects analysis
-requests while the vector index is empty.
+The checked-in corpus currently contains reviewed Section 1(1) samples for
+BNS, BNSS, and BSA. Citations outside that corpus remain visibly unverified;
+they must not be presented as word-for-word statutory text until authoritative
+records are added and reviewed.

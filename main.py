@@ -4,19 +4,16 @@ TRANA — FastAPI Application
 
 A production-ready AI Legal Advisor API that:
 
-  • Ingests legal PDF documents (agreements, case files, contracts).
-  • Chunks them with structure-aware splitting that respects section
-    boundaries.
-  • Stores embeddings in a persistent ChromaDB vector store.
-  • Answers legal questions via a hybrid retrieval pipeline (dense + BM25)
-    with cross-encoder reranking and a strictly grounded LLM.
+  • Accepts optional PDF/DOCX uploads as ephemeral user-provided context.
+  • Does not build or query a local vector database.
+  • Maintains a small versioned legal-source registry for exact statutory text.
+  • Answers legal questions directly with the selected Gemini model and
+    deterministically verifies any statutory source before returning it.
 
 Endpoints
 ---------
-  POST /api/ingest      — Upload and ingest a PDF document.
+  POST /api/extract     — Extract temporary text from a PDF or DOCX.
   POST /api/analyze     — Ask a legal question and receive structured analysis.
-  GET  /api/documents   — List all ingested documents.
-  DELETE /api/documents — Delete a specific document from the index.
   GET  /health          — Health check with system status.
 
 Usage
@@ -30,11 +27,7 @@ Usage
 from __future__ import annotations
 
 import shutil
-import secrets
-import time
 from datetime import datetime
-from pathlib import PurePosixPath
-from zipfile import BadZipFile, ZipFile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -54,7 +47,6 @@ from config import settings
 from database import engine, get_db, Base
 import models.db_models as db_models
 import json
-import sqlite3
 from sqlalchemy import inspect, text
 
 print("[Progress] Loading schemas...")
@@ -89,41 +81,14 @@ from key_manager import (
     mark_quick_temporarily_unavailable,
     rotate_key,
 )
+from legal_sources.registry import get_registry
 
 print("[Progress] Loading Logger...")
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_health_documents_indexed = 0
-_health_vector_store_ready = False
-
-
-def _get_persisted_chunk_count() -> int:
-    """Read the persisted Chroma chunk count without initializing embeddings."""
-    chroma_db = Path(settings.chroma_persist_dir) / "chroma.sqlite3"
-    if not chroma_db.is_file():
-        return 0
-
-    try:
-        with sqlite3.connect(f"file:{chroma_db}?mode=ro", uri=True) as connection:
-            return int(connection.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0])
-    except (sqlite3.Error, TypeError, ValueError) as exc:
-        logger.warning("Could not read persisted Chroma chunk count: %s", exc)
-        return 0
-
-
-def _auto_restore_seed_snapshot() -> None:
-    """Restore the bundled fixed document index when local storage is empty."""
-    project_root = Path(__file__).resolve().parent
-    seed_archive = project_root / "deployment-seed.zip"
-
-    if not seed_archive.is_file() or _get_persisted_chunk_count() > 0:
-        return
-
-    logger.info("Restoring bundled RAG seed snapshot from %s", seed_archive.name)
-    _safe_extract_seed_archive(seed_archive)
-    logger.info("Bundled RAG seed snapshot restored (%s chunks)", _get_persisted_chunk_count())
+_health_source_registry_ready = False
 
 
 def _ensure_chat_message_metadata_columns() -> None:
@@ -153,9 +118,9 @@ async def lifespan(app: FastAPI):
       - Ensure required directories exist.
       - Initialize the configured SQL schema.
 
-    Heavy RAG modules are loaded lazily by the endpoints that need them. This
-    lets Uvicorn bind Render's port before importing the document-processing
-    and retrieval stack.
+    The direct-analysis service only initializes the application database,
+    key store, and verified legal-source registry. No vector store or local
+    retrieval model is loaded at startup.
 
     On shutdown:
       - Log a clean shutdown message.
@@ -170,8 +135,6 @@ async def lifespan(app: FastAPI):
     print("[Progress] Ensuring STATIC_DIR exists...")
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
-    _auto_restore_seed_snapshot()
-    
     print("[Progress] Initializing application database...")
     db_models.Base.metadata.create_all(bind=engine)
     _ensure_chat_message_metadata_columns()
@@ -180,9 +143,13 @@ async def lifespan(app: FastAPI):
     print("[Progress] Application startup logic complete.")
     logger.info("Startup complete. Server ready on http://%s:%d", settings.host, settings.port)
     logger.info("=" * 60)
-    global _health_documents_indexed, _health_vector_store_ready
-    _health_documents_indexed = _get_persisted_chunk_count()
-    _health_vector_store_ready = (Path(settings.chroma_persist_dir) / "chroma.sqlite3").exists()
+    global _health_source_registry_ready
+    try:
+        get_registry()
+        _health_source_registry_ready = True
+    except Exception:
+        _health_source_registry_ready = False
+        logger.exception("Legal source registry failed validation during startup.")
 
     yield  # ← Application runs here.
 
@@ -196,9 +163,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="TRANA",
     description=(
-        "AI-powered legal document analysis API. Upload contracts and legal "
-        "agreements, then ask natural-language questions to receive structured, "
-        "grounded analysis with source citations."
+        "AI-powered direct legal analysis API. Ask natural-language questions "
+        "and receive structured analysis with registry-verified citations."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -587,17 +553,21 @@ async def health_check() -> HealthResponse:
     """
     Return the health status of TRANA.
 
-    Includes the number of indexed document chunks and whether the vector
-    store is operational.
+    Reports API readiness and whether the deterministic legal-source registry
+    is available. Legacy vector-store fields remain for older clients.
     """
-    global _health_documents_indexed, _health_vector_store_ready
-    _health_documents_indexed = _get_persisted_chunk_count()
-    _health_vector_store_ready = (Path(settings.chroma_persist_dir) / "chroma.sqlite3").exists()
+    global _health_source_registry_ready
+    try:
+        get_registry()
+        _health_source_registry_ready = True
+    except Exception:
+        _health_source_registry_ready = False
 
     return HealthResponse(
         status="healthy",
-        documents_indexed=_health_documents_indexed,
-        vector_store_ready=_health_vector_store_ready,
+        source_registry_ready=_health_source_registry_ready,
+        documents_indexed=0,
+        vector_store_ready=False,
     )
 
 
@@ -647,6 +617,10 @@ def import_seed_snapshot(
     x_seed_token: str | None = Header(default=None),
 ) -> dict:
     """Replace the local SQLite/Chroma state with a supplied ZIP snapshot."""
+    raise HTTPException(
+        status_code=410,
+        detail="Local vector-store seed imports are disabled; TRANA uses direct analysis.",
+    )
     expected_token = settings.seed_upload_token
     if not expected_token or not x_seed_token or not secrets.compare_digest(x_seed_token, expected_token):
         raise HTTPException(status_code=403, detail="Seed import is not authorized.")
@@ -704,6 +678,10 @@ def ingest_document(
     Upload PDFs, parse them, chunk them with section-aware splitting, embed
     the chunks, and store them in the vector database.
     """
+    raise HTTPException(
+        status_code=410,
+        detail="Local document indexing is disabled; upload documents for ephemeral context instead.",
+    )
     from ingestion.chunker import chunk_document
     from ingestion.parser import parse_pdf
     from retrieval.bm25_retriever import rebuild_bm25_from_vector_store
@@ -881,34 +859,19 @@ async def analyze(
     Submit a legal question and receive a structured, grounded analysis.
 
     The pipeline:
-      1. Hybrid retrieval (dense vector + BM25 keyword search).
-      2. Cross-encoder reranking (Cohere Rerank → top 5 chunks).
-      3. LLM generation with strict system prompt and source-attributed
-         context.
+      1. Direct structured generation from the selected Gemini model.
+      2. Deterministic lookup of candidate legal citations in the verified
+         source registry.
+      3. Response packaging with exact text only for registry-backed sources.
 
     The response includes:
       - Structured analysis (Plain English Summary, Key Findings,
         Scenarios & Outcomes, Strategic Recommendations).
-      - Ranked source chunks with document/section attribution.
+      - Verified legal sources with Act/section attribution.
       - Processing time metrics.
     """
     # ── Preflight check ─────────────────────────────────────────────────
     from llm.chain import run_analysis_pipeline
-    from retrieval.vector_store import get_document_count
-
-    global _health_documents_indexed, _health_vector_store_ready
-    doc_count = get_document_count()
-    _health_documents_indexed = doc_count
-    _health_vector_store_ready = True
-    if doc_count == 0:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "No documents have been ingested yet. Please upload at least "
-                "one legal document via POST /api/ingest before querying."
-            ),
-        )
-
     # Save user message to DB if chat_id is provided
     if request.chat_id:
         # Check if chat exists and belongs to the user
@@ -1011,6 +974,10 @@ def list_documents() -> dict:
     Return a list of all unique document names currently in the index,
     along with per-document chunk counts.
     """
+    raise HTTPException(
+        status_code=410,
+        detail="Local document indexing is disabled in direct-analysis mode.",
+    )
     from retrieval.vector_store import get_vector_store
 
     try:
@@ -1064,6 +1031,10 @@ def remove_document(
     Remove all chunks belonging to a specific document and rebuild the
     BM25 index.
     """
+    raise HTTPException(
+        status_code=410,
+        detail="Local document indexing is disabled in direct-analysis mode.",
+    )
     from retrieval.bm25_retriever import rebuild_bm25_from_vector_store
     from retrieval.vector_store import delete_document
 

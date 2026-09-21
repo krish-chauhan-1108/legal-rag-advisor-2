@@ -6,34 +6,16 @@ SQLAlchemy>=2.0.36
 psycopg[binary]>=3.2.3
 
 # === LangChain Ecosystem ===
-langchain>=0.3.14
 langchain-core>=0.3.52
-langchain-community>=0.3.14
-langchain-ollama>=0.3.2
 langchain-google-genai>=2.0.0
-langchain-chroma>=0.2.1
 
 # === Document Parsing ===
 pypdf>=5.1.0
-unstructured>=0.16.12
-
-# === Embeddings & Vector Store ===
-chromadb>=0.6.3
-faiss-cpu>=1.9.0
-
-# === BM25 Keyword Search ===
-rank-bm25>=0.2.2
-
-# === Re-ranking (local cross-encoder) ===
-sentence-transformers>=3.4.1
+python-docx>=1.1.2
 
 # === Utilities ===
 pydantic>=2.10.5
 pydantic-settings>=2.7.1
 cryptography>=43.0.0
 python-dotenv>=1.0.1
-tiktoken>=0.8.0
 tenacity>=9.0.0
-scikit-learn>=1.6.1
-numpy
-datasets>=3.5.0
