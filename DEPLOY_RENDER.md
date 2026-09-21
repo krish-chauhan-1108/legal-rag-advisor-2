@@ -1,6 +1,8 @@
 # Free deployment checklist
 
-TRANA uses direct Gemini analysis. The normal chat path does not load a local
+TRANA uses direct provider analysis. Quick Thinking tries configured GPT-OSS
+providers first, then Llama-compatible routes, while Deep Thinking remains
+Google/Gemma-compatible. The normal chat path does not load a local
 vector database, embeddings, BM25, or a reranker.
 
 ## 1. Deploy the backend on Render
@@ -8,9 +10,12 @@ vector database, embeddings, BM25, or a reranker.
 1. Open Render Dashboard and choose **New -> Blueprint**.
 2. Connect GitHub and select `krish-chauhan-1108/legal-rag-advisor-2` on `main`.
 3. Review `render.yaml` and apply the Blueprint.
-4. In the service Environment page, set the Gemini key variables you use:
+4. Existing Google deployments may keep the Gemini key variables:
    `GEMINI_API_KEY`, `GEMINI_API_KEY_FALLBACK`, `GEMINI_API_KEY_3`, and
    `GEMINI_API_KEY_4`.
+   Optional provider bootstrap variables are `GROQ_API_KEY`,
+   `CEREBRAS_API_KEY`, and `NVIDIA_API_KEY`; additional keys and all routing
+   priority should be managed through the private admin console.
 5. Set `GOOGLE_CLIENT_ID` to the OAuth web-client ID used by the frontend.
 6. Open `/health` and confirm `status` is `healthy` and
    `source_registry_ready` is `true`.
@@ -36,9 +41,10 @@ Also set `API_KEY_ENCRYPTION_KEY` in Render. Generate one locally with:
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-The service imports any configured legacy Gemini variables into the encrypted
-key pool without duplicating existing fingerprints. Usage counters track
-TRANA's provider attempts by key, model, minute, and IST day; they do not show
+The service imports configured legacy Gemini and optional provider variables
+into encrypted key pools without duplicating existing fingerprints. Usage
+counters track TRANA's provider attempts by key, provider, model, minute, and
+IST day; they do not show
 usage made by the same keys elsewhere in Google AI Studio.
 
 ## 4. Point Vercel at the backend

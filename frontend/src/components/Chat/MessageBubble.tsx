@@ -88,7 +88,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const displayedContent = isUser ? message.content : animatedContent;
   const cleanContent = displayedContent.replace(/\|\n\n\|/g, '|\n|');
   const htmlContent = marked.parse(cleanContent) as string;
-  const modelLabel = message.model_used?.toLowerCase().includes('gemini')
+  const normalizedModel = message.model_used?.toLowerCase() || '';
+  const modelLabel = normalizedModel.startsWith('quick:')
+    || normalizedModel.includes('flash')
+    || normalizedModel.includes('gpt-oss')
+    || normalizedModel.includes('llama')
     ? 'Quick Thinking'
     : 'Deep Thinking';
   const formattedMessageTime = message.created_at

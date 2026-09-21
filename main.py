@@ -77,9 +77,13 @@ from key_manager import (
     encrypt_api_key,
     fingerprint_api_key,
     initialize_key_store,
+    initialize_provider_key_store,
     mask_api_key,
     is_quota_error,
     mark_quick_temporarily_unavailable,
+    normalize_mode,
+    normalize_provider,
+    PROVIDER_ENV_DEFAULT_MODELS,
     rotate_key,
 )
 from legal_sources.registry import get_registry
@@ -140,6 +144,8 @@ async def lifespan(app: FastAPI):
     db_models.Base.metadata.create_all(bind=engine)
     _ensure_chat_message_metadata_columns()
     initialize_key_store()
+    if encryption_is_configured():
+        initialize_provider_key_store(PROVIDER_ENV_DEFAULT_MODELS)
 
     print("[Progress] Application startup logic complete.")
     logger.info("Startup complete. Server ready on http://%s:%d", settings.host, settings.port)
@@ -251,7 +257,7 @@ def authenticate_google(auth_in: GoogleAuthRequest, db: Session = Depends(get_db
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Admin API: encrypted Gemini keys and provider usage
+# Admin API: encrypted provider keys and provider usage
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _admin_email_set() -> set[str]:
@@ -281,10 +287,19 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def _admin_key_response(row: db_models.GeminiAPIKey) -> dict:
+def _admin_key_response(row: object, *, legacy: bool = False) -> dict:
+    provider = getattr(row, "provider", None) or "google"
+    model = getattr(row, "model", None) or getattr(row, "model_id", None)
+    if not model:
+        model = "gemini-2.5-flash"
+    mode = getattr(row, "mode", None) or "quick"
     return {
         "id": row.id,
         "label": row.label,
+        "provider": provider,
+        "model": model,
+        "mode": mode,
+        "base_url": getattr(row, "base_url", None),
         "fingerprint": row.fingerprint,
         "masked_key": row.masked_key,
         "is_active": row.is_active,
@@ -312,12 +327,15 @@ def list_admin_keys(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     _require_encrypted_key_store()
-    rows = (
+    provider_rows = db.query(db_models.ProviderAPIKey).all()
+    legacy_rows = (
         db.query(db_models.GeminiAPIKey)
         .order_by(db_models.GeminiAPIKey.rotation_order.asc(), db_models.GeminiAPIKey.created_at.asc())
         .all()
     )
-    return [_admin_key_response(row) for row in rows]
+    rows = [(_row, False) for _row in provider_rows] + [(_row, True) for _row in legacy_rows]
+    rows.sort(key=lambda item: (item[0].rotation_order, item[0].created_at))
+    return [_admin_key_response(row) for row, _legacy in rows]
 
 
 @app.post("/api/admin/keys", response_model=AdminAPIKeyResponse, status_code=201, tags=["Admin"])
@@ -329,18 +347,32 @@ def create_admin_key(
     _require_encrypted_key_store()
     secret = key_in.api_key.strip()
     fingerprint = fingerprint_api_key(secret)
-    if db.query(db_models.GeminiAPIKey).filter(db_models.GeminiAPIKey.fingerprint == fingerprint).first():
+    provider = normalize_provider(key_in.provider)
+    model = key_in.model.strip()
+    mode = normalize_mode(key_in.mode)
+    if db.query(db_models.ProviderAPIKey).filter(
+        db_models.ProviderAPIKey.provider == provider,
+        db_models.ProviderAPIKey.fingerprint == fingerprint,
+    ).first() or db.query(db_models.GeminiAPIKey).filter(
+        db_models.GeminiAPIKey.fingerprint == fingerprint,
+    ).first():
         raise HTTPException(status_code=409, detail="This API key is already configured.")
 
     if key_in.rotation_order is None:
-        highest_order = db.query(db_models.GeminiAPIKey.rotation_order).order_by(
-            db_models.GeminiAPIKey.rotation_order.desc()
-        ).first()
+        highest_order = db.query(db_models.ProviderAPIKey.rotation_order).filter(
+        db_models.ProviderAPIKey.provider == provider,
+        db_models.ProviderAPIKey.model == model,
+        db_models.ProviderAPIKey.mode == mode,
+        ).order_by(db_models.ProviderAPIKey.rotation_order.desc()).first()
         rotation_order = (highest_order[0] + 1) if highest_order else 0
     else:
         rotation_order = key_in.rotation_order
 
-    row = db_models.GeminiAPIKey(
+    row = db_models.ProviderAPIKey(
+        provider=provider,
+        model=model,
+        mode=mode,
+        base_url=key_in.base_url.strip() if key_in.base_url else None,
         label=key_in.label.strip(),
         encrypted_key=encrypt_api_key(secret),
         fingerprint=fingerprint,
@@ -366,11 +398,23 @@ def update_admin_key(
     db: Session = Depends(get_db),
 ) -> dict:
     _require_encrypted_key_store()
-    row = db.query(db_models.GeminiAPIKey).filter(db_models.GeminiAPIKey.id == key_id).first()
+    row = db.query(db_models.ProviderAPIKey).filter(db_models.ProviderAPIKey.id == key_id).first()
+    legacy = False
+    if row is None:
+        row = db.query(db_models.GeminiAPIKey).filter(db_models.GeminiAPIKey.id == key_id).first()
+        legacy = row is not None
     if row is None:
         raise HTTPException(status_code=404, detail="API key not found.")
     if key_in.label is not None:
         row.label = key_in.label.strip()
+    if key_in.provider is not None and not legacy:
+        row.provider = normalize_provider(key_in.provider)
+    if key_in.model is not None and not legacy:
+        row.model = key_in.model.strip()
+    if key_in.mode is not None and not legacy:
+        row.mode = normalize_mode(key_in.mode)
+    if key_in.base_url is not None and not legacy:
+        row.base_url = key_in.base_url.strip() or None
     if key_in.is_active is not None:
         row.is_active = key_in.is_active
     if key_in.rotation_order is not None:
@@ -378,7 +422,7 @@ def update_admin_key(
     row.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
-    return _admin_key_response(row)
+    return _admin_key_response(row, legacy=legacy)
 
 
 @app.delete("/api/admin/keys/{key_id}", tags=["Admin"])
@@ -388,12 +432,20 @@ def delete_admin_key(
     db: Session = Depends(get_db),
 ) -> dict:
     _require_encrypted_key_store()
-    row = db.query(db_models.GeminiAPIKey).filter(db_models.GeminiAPIKey.id == key_id).first()
+    row = db.query(db_models.ProviderAPIKey).filter(db_models.ProviderAPIKey.id == key_id).first()
+    is_provider_row = row is not None
+    if row is None:
+        row = db.query(db_models.GeminiAPIKey).filter(db_models.GeminiAPIKey.id == key_id).first()
     if row is None:
         raise HTTPException(status_code=404, detail="API key not found.")
-    db.query(db_models.GeminiAPIKeyUsage).filter(db_models.GeminiAPIKeyUsage.api_key_id == key_id).delete(
-        synchronize_session=False
-    )
+    if is_provider_row:
+        db.query(db_models.ProviderAPIKeyUsage).filter(
+            db_models.ProviderAPIKeyUsage.provider_key_id == key_id
+        ).delete(synchronize_session=False)
+    else:
+        db.query(db_models.GeminiAPIKeyUsage).filter(
+            db_models.GeminiAPIKeyUsage.api_key_id == key_id
+        ).delete(synchronize_session=False)
     db.delete(row)
     db.commit()
     return {"status": "success", "id": key_id}
@@ -415,13 +467,20 @@ def admin_usage(
 ) -> dict:
     _require_encrypted_key_store()
     minute_start, day_start = _bucket_starts()
-    keys = db.query(db_models.GeminiAPIKey).order_by(db_models.GeminiAPIKey.rotation_order.asc()).all()
-    usage_rows = db.query(db_models.GeminiAPIKeyUsage).all()
-    models = {"gemini-2.5-flash", settings.llm_model}
-    grouped: dict[tuple[str, str], dict[str, dict[str, int]]] = {}
+    try:
+        provider_keys = db.query(db_models.ProviderAPIKey).order_by(db_models.ProviderAPIKey.rotation_order.asc()).all()
+    except AssertionError:
+        provider_keys = []
+    legacy_keys = db.query(db_models.GeminiAPIKey).order_by(db_models.GeminiAPIKey.rotation_order.asc()).all()
+    try:
+        usage_rows = db.query(db_models.ProviderAPIKeyUsage).all()
+    except AssertionError:
+        usage_rows = []
+    legacy_usage_rows = db.query(db_models.GeminiAPIKeyUsage).all()
+    keys = [(_row, False) for _row in provider_keys] + [(_row, True) for _row in legacy_keys]
+    grouped: dict[tuple[str, str, str, str], dict[str, dict[str, int]]] = {}
     for usage in usage_rows:
-        models.add(usage.model)
-        entry = grouped.setdefault((usage.api_key_id, usage.model), {
+        entry = grouped.setdefault((usage.provider_key_id, usage.provider, usage.model, usage.mode), {
             "minute": _zero_usage(),
             "day": _zero_usage(),
             "all_time": _zero_usage(),
@@ -439,10 +498,30 @@ def admin_usage(
             target["failed_requests"] += usage.failed_requests
             target["quota_failures"] += usage.quota_failures
 
+    for usage in legacy_usage_rows:
+        entry = grouped.setdefault((usage.api_key_id, "google", usage.model, "quick"), {
+            "minute": _zero_usage(), "day": _zero_usage(), "all_time": _zero_usage(),
+        })
+        targets = []
+        if usage.bucket_type == "minute" and usage.bucket_start == minute_start:
+            targets.append(entry["minute"])
+        if usage.bucket_type == "day":
+            targets.append(entry["all_time"])
+            if usage.bucket_start == day_start:
+                targets.append(entry["day"])
+        for target in targets:
+            target["total_requests"] += usage.total_requests
+            target["successful_requests"] += usage.successful_requests
+            target["failed_requests"] += usage.failed_requests
+            target["quota_failures"] += usage.quota_failures
+
     result_rows = []
-    for key in keys:
-        for model in sorted(models):
-            counts = grouped.get((key.id, model), {
+    for key, legacy in keys:
+        provider = getattr(key, "provider", None) or "google"
+        models = [getattr(key, "model", None)] if not legacy else ["gemini-2.5-flash", settings.llm_model]
+        for model in sorted({item for item in models if item}):
+            mode = getattr(key, "mode", None) or "quick"
+            counts = grouped.get((key.id, provider, model, mode), {
                 "minute": _zero_usage(),
                 "day": _zero_usage(),
                 "all_time": _zero_usage(),
@@ -451,7 +530,9 @@ def admin_usage(
                 "api_key_id": key.id,
                 "label": key.label,
                 "masked_key": key.masked_key,
+                "provider": provider,
                 "model": model,
+                "mode": mode,
                 **counts,
             })
 

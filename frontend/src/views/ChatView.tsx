@@ -317,7 +317,7 @@ export const ChatView: React.FC = () => {
         if (quickIsUnavailable) {
           setQuickUnavailable(true);
           setModelPref('deep');
-          detail = 'Quick Thinking is temporarily unavailable because Gemini Flash has reached its limit on all configured API keys. Deep Thinking is still available.';
+          detail = 'Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited. Deep Thinking is still available.';
         }
         setMessages(prev => [...prev, {
           role: 'assistant',
@@ -355,7 +355,7 @@ export const ChatView: React.FC = () => {
         {quickUnavailable && (
           <div className="chat-view__alert mt-2 flex items-center justify-end gap-1.5 text-xs text-amber-700" role="status">
             <AlertTriangle className="h-3.5 w-3.5" />
-            Quick Thinking is temporarily unavailable. Please use Deep Thinking for now.
+            Quick Thinking is temporarily unavailable. Please try again shortly or use Deep Thinking for now.
           </div>
         )}
       </header>

@@ -29,6 +29,10 @@ type AccessState = 'checking' | 'authorized' | 'unauthenticated' | 'forbidden' |
 interface KeyFormState {
   label: string;
   apiKey: string;
+  provider: string;
+  model: string;
+  mode: 'quick' | 'deep';
+  baseUrl: string;
   rotationOrder: string;
 }
 
@@ -91,7 +95,7 @@ const AdminKeyRow: React.FC<{
       <div className="admin-key-icon"><KeyRound size={17} /></div>
       <div>
         <div className="admin-key-label">{keyRecord.label}</div>
-        <div className="admin-key-mask">{keyRecord.maskedKey}</div>
+        <div className="admin-key-mask">{keyRecord.provider} · {keyRecord.model} · {keyRecord.maskedKey}</div>
       </div>
     </div>
     <div className="admin-key-row__meta">
@@ -136,7 +140,7 @@ export const AdminView: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [form, setForm] = useState<KeyFormState>({ label: '', apiKey: '', rotationOrder: '1' });
+  const [form, setForm] = useState<KeyFormState>({ label: '', apiKey: '', provider: 'groq', model: 'openai/gpt-oss-120b', mode: 'quick', baseUrl: '', rotationOrder: '1' });
   const [isAdding, setIsAdding] = useState(false);
   const [savingKeyId, setSavingKeyId] = useState<string | null>(null);
   const [rotationDrafts, setRotationDrafts] = useState<Record<string, string>>({});
@@ -237,8 +241,8 @@ export const AdminView: React.FC = () => {
     setError(null);
     setIsAdding(true);
     try {
-      await createAdminKey(credential, { label, api_key: apiKey, rotation_order: rotationOrder });
-      setForm({ label: '', apiKey: '', rotationOrder: String(keys.length + 2) });
+      await createAdminKey(credential, { label, api_key: apiKey, provider: form.provider, model: form.model, mode: form.mode, ...(form.baseUrl.trim() ? { base_url: form.baseUrl.trim() } : {}), rotation_order: rotationOrder });
+      setForm({ label: '', apiKey: '', provider: form.provider, model: form.model, mode: form.mode, baseUrl: form.baseUrl, rotationOrder: String(keys.length + 2) });
       await loadDashboard(true);
     } catch (addError) {
       setFormError(getErrorText(addError, 'That API key could not be added.'));
@@ -285,7 +289,7 @@ export const AdminView: React.FC = () => {
         <div>
           <p className="admin-eyebrow">TRANA operations</p>
           <h2>Admin console</h2>
-          <p className="admin-page__subtitle">Manage Gemini rotation and monitor provider usage.</p>
+          <p className="admin-page__subtitle">Manage provider rotation and monitor Quick Thinking capacity.</p>
         </div>
         <button type="button" className="admin-secondary-button" onClick={() => void loadDashboard(true)} disabled={refreshing || loading}>
           <RefreshCw size={15} className={refreshing ? 'admin-spin' : ''} />
@@ -320,8 +324,33 @@ export const AdminView: React.FC = () => {
                 <input value={form.label} onChange={(event) => setForm(current => ({ ...current, label: event.target.value }))} placeholder="Primary production key" maxLength={80} />
               </label>
               <label className="admin-field admin-field--wide">
-                <span>Google AI Studio API key</span>
+                <span>Provider API key</span>
                 <input type="password" value={form.apiKey} onChange={(event) => setForm(current => ({ ...current, apiKey: event.target.value }))} placeholder="Paste a key; it clears after submission" autoComplete="off" spellCheck={false} />
+              </label>
+              <label className="admin-field">
+                <span>Provider</span>
+                <select value={form.provider} onChange={(event) => setForm(current => ({ ...current, provider: event.target.value }))}>
+                  <option value="groq">Groq</option>
+                  <option value="cerebras">Cerebras</option>
+                  <option value="nvidia">NVIDIA</option>
+                  <option value="google">Google</option>
+                  <option value="llama">Llama-compatible</option>
+                </select>
+              </label>
+              <label className="admin-field">
+                <span>Model ID</span>
+                <input value={form.model} onChange={(event) => setForm(current => ({ ...current, model: event.target.value }))} placeholder="openai/gpt-oss-120b" />
+              </label>
+              <label className="admin-field">
+                <span>Mode</span>
+                <select value={form.mode} onChange={(event) => setForm(current => ({ ...current, mode: event.target.value as 'quick' | 'deep' }))}>
+                  <option value="quick">Quick Thinking</option>
+                  <option value="deep">Deep Thinking</option>
+                </select>
+              </label>
+              <label className="admin-field admin-field--wide">
+                <span>Custom base URL (optional)</span>
+                <input value={form.baseUrl} onChange={(event) => setForm(current => ({ ...current, baseUrl: event.target.value }))} placeholder="Only for custom OpenAI-compatible endpoints" />
               </label>
               <label className="admin-field admin-field--order">
                 <span>Order</span>

@@ -8,9 +8,12 @@ then populated only from :mod:`legal_sources.registry`.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from typing import Optional
+
+import httpx
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -18,12 +21,16 @@ from config import settings
 from key_manager import (
     QuickModelUnavailableError,
     clear_quick_temporarily_unavailable,
+    get_active_provider_pools,
+    get_current_provider_key_record,
     get_active_key_count,
     get_current_key_record,
     is_quota_error,
     is_quick_temporarily_unavailable,
     mark_quick_temporarily_unavailable,
     record_provider_attempt,
+    record_provider_key_attempt,
+    rotate_provider_key,
     rotate_key,
 )
 from legal_sources.registry import LawSourceRegistry, get_registry
@@ -35,6 +42,125 @@ logger = get_logger(__name__)
 
 _llms = {}
 _REPEATED_WORDS = re.compile(r"\b(\w+)(?:\s+\1){2,}\b", re.IGNORECASE)
+
+_PROVIDER_BASE_URLS = {
+    "groq": "https://api.groq.com/openai/v1",
+    "cerebras": "https://api.cerebras.ai/v1",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
+}
+
+
+def _model_family(model: str) -> str:
+    value = (model or "").lower()
+    if "gpt-oss" in value or "gpt_oss" in value:
+        return "gpt-oss"
+    if "llama" in value:
+        return "llama"
+    return "other"
+
+
+def _quick_routes():
+    """Return active Quick Thinking records in model-family priority order."""
+
+    provider_order = {"groq": 0, "cerebras": 1, "nvidia": 2, "google": 3}
+    routes = []
+    for (provider, model, mode), records in get_active_provider_pools().items():
+        if mode != "quick":
+            continue
+        for record in records:
+            family = _model_family(model)
+            if family == "gpt-oss":
+                route_priority = 0
+            elif provider == "nvidia":
+                route_priority = 1
+            elif family == "llama":
+                route_priority = 2
+            else:
+                route_priority = 3
+            routes.append((
+                route_priority,
+                provider_order.get(provider, 9),
+                record.rotation_order,
+                record,
+            ))
+    return [item[3] for item in sorted(routes, key=lambda item: item[:3])]
+
+
+def _provider_url(record) -> str:
+    return (getattr(record, "base_url", None) or _PROVIDER_BASE_URLS.get(record.provider, "")).rstrip("/")
+
+
+def _message_text(message) -> str:
+    content = message.content
+    if isinstance(content, list):
+        return "".join(str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in content)
+    return str(content)
+
+
+async def _invoke_openai_compatible(record, messages, timeout: float | None) -> StructuredAnalysis:
+    base_url = _provider_url(record)
+    if not base_url:
+        raise RuntimeError(f"No compatible base URL configured for provider {record.provider}.")
+    payload = {
+        "model": record.model,
+        "messages": [{"role": "system" if isinstance(message, SystemMessage) else "user", "content": _message_text(message)} for message in messages],
+        "temperature": settings.llm_temperature,
+        "max_tokens": 1024,
+    }
+    headers = {"Authorization": f"Bearer {record.secret}", "Content-Type": "application/json"}
+    request_timeout = timeout or 20.0
+    async with httpx.AsyncClient(timeout=request_timeout) as client:
+        response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+    if response.status_code >= 400:
+        raise RuntimeError(f"{record.provider} HTTP {response.status_code}: {response.text[:300]}")
+    body = response.json()
+    content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+    if isinstance(content, list):
+        content = "".join(str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in content)
+    content = str(content).strip()
+    if content.startswith("```"):
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.IGNORECASE | re.DOTALL).strip()
+    try:
+        return StructuredAnalysis.model_validate(json.loads(content))
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise RuntimeError(f"{record.provider} returned invalid structured analysis JSON.") from exc
+
+
+async def _run_quick_provider_pipeline(messages, deadline: float | None):
+    routes = _quick_routes()
+    if not routes:
+        raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because no Quick Thinking providers are configured.")
+    attempted = set()
+    for record in routes:
+        if record.id in attempted:
+            continue
+        attempted.add(record.id)
+        remaining = max(0.1, (deadline - time.monotonic()) if deadline else 8.0)
+        try:
+            if record.provider == "google":
+                llm, _, key_id = _get_llm("quick", force_reinit=True, key_record=record)
+                structured = llm.with_structured_output(StructuredAnalysis)
+                response = await asyncio.wait_for(structured.ainvoke(messages), timeout=remaining)
+                analysis = response if isinstance(response, StructuredAnalysis) else StructuredAnalysis.model_validate(response)
+            else:
+                key_id = record.id
+                analysis = await _invoke_openai_compatible(record, messages, remaining)
+            record_provider_key_attempt(record.id, record.provider, record.model, record.mode, "success")
+            clear_quick_temporarily_unavailable()
+            return _sanitize_analysis(analysis), f"quick:{record.provider}:{record.model}"
+        except Exception as exc:
+            quota_error = is_quota_error(exc) or isinstance(exc, asyncio.TimeoutError)
+            record_provider_key_attempt(record.id, record.provider, record.model, record.mode, "quota" if quota_error else "failure", exc)
+            logger.warning("Quick provider route failed: provider=%s model=%s error=%s", record.provider, record.model, exc)
+            error_text = str(exc).lower()
+            retryable = quota_error or any(marker in error_text for marker in (
+                "http 408", "http 500", "http 502", "http 503", "connection", "temporarily",
+            ))
+            if not retryable:
+                raise RuntimeError(f"Quick Thinking provider configuration failed: {exc}") from exc
+            continue
+    mark_quick_temporarily_unavailable()
+    raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited or unavailable.")
 
 
 def _clean_model_text(value: str, max_length: int = 1200) -> str:
@@ -70,15 +196,16 @@ def _sanitize_analysis(analysis: StructuredAnalysis) -> StructuredAnalysis:
     return analysis
 
 
-def _get_llm(model_preference: str = "deep", force_reinit: bool = False):
+def _get_llm(model_preference: str = "deep", force_reinit: bool = False, key_record=None):
     """Lazily initialize the selected Google model for the active API key."""
 
     global _llms
-    target_model = "gemini-2.5-flash" if model_preference == "quick" else settings.llm_model
-
-    key_record = get_current_key_record()
+    key_record = key_record or get_current_key_record()
     if key_record is None:
         raise RuntimeError("No active Gemini API keys are configured.")
+    target_model = getattr(key_record, "model", None) or (
+        "gemini-2.5-flash" if model_preference == "quick" else settings.llm_model
+    )
 
     cache_key = (target_model, key_record.id)
     if cache_key in _llms and not force_reinit:
@@ -193,10 +320,9 @@ async def run_analysis_pipeline(
 
     del document_filter, top_k, user_id
 
-    if model_preference == "quick" and is_quick_temporarily_unavailable():
+    if model_preference == "quick" and is_quick_temporarily_unavailable() and not _quick_routes():
         raise QuickModelUnavailableError(
-            "Quick Thinking is temporarily unavailable because Gemini Flash "
-            "has reached the limit on all configured API keys."
+            "Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited or unavailable."
         )
 
     start_time = time.time()
@@ -216,6 +342,22 @@ async def run_analysis_pipeline(
             )
         )
     messages.append(HumanMessage(content=prompt))
+
+    if model_preference == "quick":
+        structured_analysis, actual_model_used = await _run_quick_provider_pipeline(
+            messages,
+            time.monotonic() + min(settings.analysis_deadline_seconds, 20.0),
+        )
+        registry = source_registry if source_registry is not None else get_registry()
+        source_chunks = _verify_law_candidates(structured_analysis, registry)
+        elapsed = round(time.time() - start_time, 2)
+        return AnalysisResponse(
+            query=query,
+            analysis=structured_analysis,
+            sources=source_chunks,
+            model_used=actual_model_used,
+            processing_time_seconds=elapsed,
+        )
 
     active_model_preference = model_preference
     deep_fallback_used = False

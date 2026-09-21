@@ -22,6 +22,10 @@ class _Database:
         self.usage_rows = usage_rows
 
     def query(self, model):
+        if model is db_models.ProviderAPIKey:
+            return _Query([])
+        if model is db_models.ProviderAPIKeyUsage:
+            return _Query([])
         if model is db_models.GeminiAPIKey:
             return _Query(self.keys)
         if model is db_models.GeminiAPIKeyUsage:

@@ -9,6 +9,10 @@ export interface AdminAccess {
 export interface AdminKey {
   id: string;
   label: string;
+  provider: string;
+  model: string;
+  mode: 'quick' | 'deep' | string;
+  baseUrl?: string | null;
   maskedKey: string;
   active: boolean;
   rotationOrder: number;
@@ -27,7 +31,9 @@ export interface UsageBucket {
 
 export interface AdminUsageRow {
   keyId: string;
+  provider: string;
   model: string;
+  mode: string;
   minute: UsageBucket;
   day: UsageBucket;
 }
@@ -129,6 +135,10 @@ export const getAdminKeys = async (credential: string): Promise<AdminKey[]> => {
     return {
       id: firstString(record, ['id', 'key_id'], String(index)),
       label: firstString(record, ['label', 'name'], `Gemini key ${index + 1}`),
+      provider: firstString(record, ['provider'], 'google'),
+      model: firstString(record, ['model', 'model_id', 'model_name'], 'gemini-2.5-flash'),
+      mode: firstString(record, ['mode'], 'quick'),
+      baseUrl: firstString(record, ['base_url', 'baseUrl'], undefined) || null,
       maskedKey: firstString(record, ['masked_key', 'api_key_masked', 'masked', 'key_display'], '••••••••'),
       active: firstBoolean(record, ['active', 'is_active', 'enabled'], true),
       rotationOrder: firstNumber(record, ['rotation_order', 'order', 'priority'], index + 1),
@@ -158,14 +168,16 @@ export const getAdminUsage = async (credential: string): Promise<AdminUsageRow[]
     if (!keyId) return [];
     return [{
       keyId,
+      provider: firstString(record, ['provider'], 'google'),
       model: firstString(record, ['model', 'model_name'], 'unknown'),
+      mode: firstString(record, ['mode'], 'quick'),
       minute: normalizeBucket(record.minute, record, 'minute'),
       day: normalizeBucket(record.day, record, 'day'),
     }];
   });
 };
 
-export const createAdminKey = (credential: string, input: { label: string; api_key: string; rotation_order: number }) => (
+export const createAdminKey = (credential: string, input: { label: string; api_key: string; provider: string; model: string; mode: string; base_url?: string; rotation_order: number }) => (
   request<unknown>(credential, '/api/admin/keys', {
     method: 'POST',
     body: JSON.stringify(input),

@@ -80,3 +80,78 @@ class GeminiAPIKeyUsage(Base):
         ),
         Index("ix_gemini_key_usage_lookup", "api_key_id", "model", "bucket_type", "bucket_start"),
     )
+
+
+class ProviderAPIKey(Base):
+    """Encrypted credentials for any model provider.
+
+    This is an additive replacement for ``GeminiAPIKey``.  The legacy table is
+    intentionally retained so old deployments and mixed-version processes can
+    continue to read existing Gemini credentials during rollout.
+    """
+
+    __tablename__ = "provider_api_keys"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    provider = Column(String(64), nullable=False, index=True)
+    model = Column(String(160), nullable=False, index=True)
+    mode = Column(String(16), nullable=False, default="quick", index=True)
+    base_url = Column(String(255), nullable=True)
+    label = Column(String(120), nullable=False)
+    encrypted_key = Column(Text, nullable=False)
+    fingerprint = Column(String(64), nullable=False, index=True)
+    masked_key = Column(String(32), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    rotation_order = Column(Integer, nullable=False, default=0, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
+    last_error_status = Column(String(32), nullable=True)
+    last_error_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "fingerprint",
+            name="uq_provider_api_key_fingerprint",
+        ),
+        Index("ix_provider_api_key_pool", "provider", "model", "mode", "is_active", "rotation_order"),
+    )
+
+
+class ProviderAPIKeyUsage(Base):
+    """Per-provider-key/model counters in minute and IST-calendar-day buckets."""
+
+    __tablename__ = "provider_api_key_usage"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    provider_key_id = Column(String, ForeignKey("provider_api_keys.id"), nullable=False, index=True)
+    provider = Column(String(64), nullable=False, index=True)
+    model = Column(String(160), nullable=False, index=True)
+    mode = Column(String(16), nullable=False, default="quick", index=True)
+    bucket_type = Column(String(16), nullable=False)
+    bucket_start = Column(DateTime, nullable=False)
+    total_requests = Column(Integer, nullable=False, default=0)
+    successful_requests = Column(Integer, nullable=False, default=0)
+    failed_requests = Column(Integer, nullable=False, default=0)
+    quota_failures = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_key_id",
+            "model",
+            "mode",
+            "bucket_type",
+            "bucket_start",
+            name="uq_provider_key_usage_bucket",
+        ),
+        Index(
+            "ix_provider_key_usage_lookup",
+            "provider_key_id",
+            "provider",
+            "model",
+            "mode",
+            "bucket_type",
+            "bucket_start",
+        ),
+    )

@@ -6,7 +6,7 @@ produce self-documenting OpenAPI specs.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -134,12 +134,20 @@ class AdminAccessResponse(BaseModel):
 class AdminAPIKeyCreate(BaseModel):
     label: str = Field(..., min_length=1, max_length=120)
     api_key: str = Field(..., min_length=20, max_length=512)
+    provider: str = Field(default="google", min_length=1, max_length=64)
+    model: str = Field(default="gemini-2.5-flash", min_length=1, max_length=160)
+    mode: Literal["quick", "deep"] = "quick"
+    base_url: Optional[str] = Field(default=None, max_length=255)
     is_active: bool = True
     rotation_order: Optional[int] = Field(default=None, ge=0)
 
 
 class AdminAPIKeyUpdate(BaseModel):
     label: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    provider: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    model: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    mode: Optional[Literal["quick", "deep"]] = None
+    base_url: Optional[str] = Field(default=None, max_length=255)
     is_active: Optional[bool] = None
     rotation_order: Optional[int] = Field(default=None, ge=0)
 
@@ -147,6 +155,10 @@ class AdminAPIKeyUpdate(BaseModel):
 class AdminAPIKeyResponse(BaseModel):
     id: str
     label: str
+    provider: str = "google"
+    model: str = "gemini-2.5-flash"
+    mode: Literal["quick", "deep"] = "quick"
+    base_url: Optional[str] = None
     fingerprint: str
     masked_key: str
     is_active: bool
@@ -169,7 +181,9 @@ class AdminUsageRow(BaseModel):
     api_key_id: str
     label: str
     masked_key: str
+    provider: str = "google"
     model: str
+    mode: Literal["quick", "deep"] = "quick"
     minute: AdminUsageCounts
     day: AdminUsageCounts
     all_time: AdminUsageCounts

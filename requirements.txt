@@ -8,6 +8,7 @@ psycopg[binary]>=3.2.3
 # === LangChain Ecosystem ===
 langchain-core>=0.3.52
 langchain-google-genai>=2.0.0
+httpx>=0.28.0
 
 # === Document Parsing ===
 pypdf>=5.1.0
