@@ -1,4 +1,4 @@
-import { authHeaders } from '../auth/auth';
+import { authFetch } from '../auth/auth';
 
 const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
@@ -61,10 +61,9 @@ const getErrorMessage = (payload: unknown, fallback: string): string => {
 };
 
 const request = async <T>(credential: string, path: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await authFetch(`${API_URL}${path}`, credential, {
     ...init,
     headers: {
-      ...authHeaders(credential),
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
       ...init?.headers,
     },

@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, Plus, Scale, Trash2, UserCircle, X } from 'lucide-react';
 import { SystemStatus } from '../components/Sidebar/SystemStatus';
 import type { ChatSession } from '../types';
-import { authHeaders, useAuth } from '../auth/auth';
+import { authFetch, useAuth } from '../auth/auth';
 
 const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 // Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
@@ -63,8 +63,7 @@ export const DashboardLayout: React.FC = () => {
         return;
       }
       try {
-        const response = await fetch(`${API_URL}/api/chats`, {
-          headers: authHeaders(credential),
+        const response = await authFetch(`${API_URL}/api/chats`, credential, {
           cache: 'no-store',
         });
         if (!response.ok) throw new Error(`Chat history failed: ${response.status}`);
@@ -98,9 +97,8 @@ export const DashboardLayout: React.FC = () => {
     if (!credential || !window.confirm(`Delete “${chat.title || 'New Chat'}”?`)) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/chats/${chat.id}`, {
+      const response = await authFetch(`${API_URL}/api/chats/${chat.id}`, credential, {
         method: 'DELETE',
-        headers: authHeaders(credential),
       });
       if (!response.ok) throw new Error(`Chat deletion failed: ${response.status}`);
 

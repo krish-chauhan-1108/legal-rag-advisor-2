@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Send, Paperclip, FileText, X, Scale, AlertTriangle } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
 import type { ApplicableLaw, ChatMessage, ChatSession, StructuredAnalysis } from '../types';
-import { authHeaders, useAuth } from '../auth/auth';
+import { authFetch, authHeaders, useAuth } from '../auth/auth';
 
 const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
 // Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
@@ -179,8 +179,7 @@ export const ChatView: React.FC = () => {
       setIsChatLoading(true);
       setMessages([]);
       try {
-        const response = await fetch(`${API_URL}/api/chats`, {
-          headers: authHeaders(credential),
+        const response = await authFetch(`${API_URL}/api/chats`, credential, {
           cache: 'no-store',
         });
         if (!response.ok) throw new Error(`Chat history failed: ${response.status}`);
@@ -254,7 +253,7 @@ export const ChatView: React.FC = () => {
     try {
       let activeChatId = routeChatId;
       if (!activeChatId) {
-        const createResponse = await fetch(`${API_URL}/api/chats`, {
+        const createResponse = await authFetch(`${API_URL}/api/chats`, credential, {
           method: 'POST',
           headers: { ...authHeaders(credential), 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: 'New Chat' }),
@@ -264,9 +263,9 @@ export const ChatView: React.FC = () => {
         activeChatId = createdChat.id;
       }
 
-      const res = await fetch(`${API_URL}/api/analyze`, {
+      const res = await authFetch(`${API_URL}/api/analyze`, credential, {
         method: 'POST',
-        headers: { ...authHeaders(credential), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: newMessage.content || "Analyze the attached document.",
           ephemeral_context: ephemeralContext,

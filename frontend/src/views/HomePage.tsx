@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import { ArrowRight, BookOpen, MessageSquareText, Scale, ShieldCheck, Sparkles } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/auth';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, signIn } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const sessionExpired = new URLSearchParams(location.search).get('reason') === 'session_expired';
   const [isSigningIn, setIsSigningIn] = useState(false);
 
   const handleGoogleSuccess = async (credential?: string) => {
@@ -76,6 +78,14 @@ export const HomePage: React.FC = () => {
           </div>
         </div>
       </header>
+
+      {sessionExpired && (
+        <div role="alert" className="mx-auto mt-5 max-w-6xl px-6 lg:px-10">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Your session expired. Please sign in with Google again to continue.
+          </div>
+        </div>
+      )}
 
       <main>
         <section className="mx-auto grid max-w-6xl gap-12 px-6 pb-20 pt-16 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-10 lg:pb-28 lg:pt-24">
