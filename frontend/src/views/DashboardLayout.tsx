@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Scale, Plus, UserCircle, Trash2 } from 'lucide-react';
+import { Menu, Plus, Scale, Trash2, UserCircle, X } from 'lucide-react';
 import { SystemStatus } from '../components/Sidebar/SystemStatus';
 import type { ChatSession } from '../types';
 import { authHeaders, useAuth } from '../auth/auth';
@@ -14,6 +14,7 @@ export const DashboardLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { credential, user } = useAuth();
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [health, setHealth] = useState<{ status: ApiStatus; docCount: number }>({ status: 'checking', docCount: 0 });
   const [chats, setChats] = useState<ChatSession[]>([]);
 
@@ -84,6 +85,7 @@ export const DashboardLayout: React.FC = () => {
   }, [credential, location.pathname]);
 
   const handleNewChat = () => {
+    setIsMobileNavOpen(false);
     if (location.pathname === '/') {
       window.location.reload();
     } else {
@@ -110,13 +112,26 @@ export const DashboardLayout: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen bg-[#F9F9F8]">
+    <div className="dashboard-shell flex h-screen bg-[#F9F9F8]">
+      <div
+        className={`dashboard-sidebar-backdrop ${isMobileNavOpen ? 'is-visible' : ''}`}
+        onClick={() => setIsMobileNavOpen(false)}
+        aria-hidden="true"
+      />
       {/* Left Sidebar */}
-      <aside className="w-72 bg-[#121212] text-white flex flex-col transition-all duration-300 flex-shrink-0">
+      <aside className={`dashboard-sidebar w-72 bg-[#121212] text-white flex flex-col transition-all duration-300 flex-shrink-0 ${isMobileNavOpen ? 'is-open' : ''}`}>
         <div className="p-6 pb-2">
-          <div className="flex items-center gap-3 mb-8 cursor-pointer" onClick={() => navigate('/home')}>
+          <div className="dashboard-sidebar__top flex items-center gap-3 mb-8 cursor-pointer" onClick={() => { setIsMobileNavOpen(false); navigate('/home'); }}>
             <Scale className="w-7 h-7 text-white" strokeWidth={1.5} />
             <h1 className="text-xl font-serif tracking-tight text-white">TRANA</h1>
+            <button
+              type="button"
+              className="dashboard-sidebar__close"
+              onClick={(event) => { event.stopPropagation(); setIsMobileNavOpen(false); }}
+              aria-label="Close navigation"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
           
           <button 
@@ -135,7 +150,7 @@ export const DashboardLayout: React.FC = () => {
               className="group relative flex items-center w-full rounded-md hover:bg-[#1E293B] transition-colors"
             >
               <button
-                onClick={() => navigate(`/chat/${chat.id}`)}
+                onClick={() => { setIsMobileNavOpen(false); navigate(`/chat/${chat.id}`); }}
                 className="w-full text-left px-3 py-2.5 pr-10 text-sm text-gray-300 group-hover:text-white rounded-md transition-colors truncate"
                 title={chat.title}
               >
@@ -159,7 +174,7 @@ export const DashboardLayout: React.FC = () => {
 
         <div className="p-4 border-t border-gray-800 space-y-2">
           <button
-            onClick={() => navigate('/account')}
+            onClick={() => { setIsMobileNavOpen(false); navigate('/account'); }}
             className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-[#1E293B] rounded-md transition-colors text-left"
           >
             {user?.picture ? (
@@ -177,8 +192,20 @@ export const DashboardLayout: React.FC = () => {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col overflow-hidden relative">
-        <Outlet />
+      <main className="dashboard-main flex-1 flex flex-col overflow-hidden relative">
+        <div className="dashboard-mobile-bar">
+          <button type="button" onClick={() => setIsMobileNavOpen(true)} aria-label="Open navigation">
+            <Menu className="h-5 w-5" />
+          </button>
+          <button type="button" className="dashboard-mobile-bar__brand" onClick={() => navigate('/home')}>
+            <Scale className="h-5 w-5" strokeWidth={1.5} />
+            <span>TRANA</span>
+          </button>
+          <span className="dashboard-mobile-bar__spacer" />
+        </div>
+        <div className="dashboard-outlet">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

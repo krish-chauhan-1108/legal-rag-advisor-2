@@ -277,11 +277,11 @@ export const ChatView: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#F2F0EB] relative">
+    <div className="chat-view flex flex-col h-full bg-[#F2F0EB] relative">
       {/* Header */}
-      <header className="h-16 border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0 z-10 bg-white/80 backdrop-blur-sm">
+      <header className="chat-view__header h-16 border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0 z-10 bg-white/80 backdrop-blur-sm">
         <h2 className="text-lg font-serif tracking-tight text-[#121212]">Legal Analysis</h2>
-        <div className="flex items-center gap-2">
+        <div className="chat-view__model flex items-center gap-2">
           <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Model:</span>
           <select
             value={modelPref}
@@ -295,7 +295,7 @@ export const ChatView: React.FC = () => {
           </select>
         </div>
         {quickUnavailable && (
-          <div className="mt-2 flex items-center justify-end gap-1.5 text-xs text-amber-700" role="status">
+          <div className="chat-view__alert mt-2 flex items-center justify-end gap-1.5 text-xs text-amber-700" role="status">
             <AlertTriangle className="h-3.5 w-3.5" />
             Quick Thinking is temporarily unavailable. Please use Deep Thinking for now.
           </div>
@@ -303,7 +303,7 @@ export const ChatView: React.FC = () => {
       </header>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="chat-view__messages flex-1 overflow-y-auto p-6 space-y-6">
         {shouldShowChatLoading ? (
           <ChatLoadingScreen />
         ) : messages.length === 0 && (
@@ -325,10 +325,10 @@ export const ChatView: React.FC = () => {
       </div>
 
       {/* Input Area */}
-      <div className="p-4 bg-white border-t border-gray-100">
+      <div className="chat-view__composer p-4 bg-white border-t border-gray-100">
         <div className="max-w-3xl mx-auto">
           {ephemeralFile && (
-            <div className="mb-3 flex items-center gap-2 bg-[#F9F9F8] border border-gray-200 text-sm py-2 px-3 rounded-md w-max">
+            <div className="chat-view__file-chip mb-3 flex items-center gap-2 bg-[#F9F9F8] border border-gray-200 text-sm py-2 px-3 rounded-md w-max">
               <FileText className="w-4 h-4 text-blue-500" />
               <span className="text-gray-700 font-medium truncate max-w-[200px]">{ephemeralFile.name}</span>
               <button onClick={() => setEphemeralFile(null)} className="text-gray-400 hover:text-gray-600 ml-2">
@@ -337,7 +337,7 @@ export const ChatView: React.FC = () => {
             </div>
           )}
           
-          <div className="flex items-center gap-3 bg-white border border-gray-300 rounded-xl px-4 py-3 shadow-sm focus-within:ring-2 focus-within:ring-[#1E293B] focus-within:border-transparent transition-all">
+          <div className="chat-view__input-shell flex items-center gap-3 bg-white border border-gray-300 rounded-xl px-4 py-3 shadow-sm focus-within:ring-2 focus-within:ring-[#1E293B] focus-within:border-transparent transition-all">
             <input 
               type="file"
               ref={fileInputRef}
@@ -349,10 +349,10 @@ export const ChatView: React.FC = () => {
               className="hidden"
               accept=".pdf,.docx"
             />
-            <button 
+            <button
+              className="chat-view__attach-button text-gray-400 hover:text-[#1E293B] transition-colors p-1"
               onClick={() => fileInputRef.current?.click()}
               disabled={!user || shouldShowChatLoading}
-              className="text-gray-400 hover:text-[#1E293B] transition-colors p-1"
               title="Attach document for this query only"
             >
               <Paperclip className="w-5 h-5" />
@@ -369,9 +369,9 @@ export const ChatView: React.FC = () => {
             />
             
             <button
+              className="chat-view__send-button bg-[#1E293B] text-white p-2 rounded-lg hover:bg-[#0F172A] disabled:opacity-50 transition-colors"
               onClick={handleSend}
               disabled={!user || isLoading || (!input.trim() && !ephemeralFile)}
-              className="bg-[#1E293B] text-white p-2 rounded-lg hover:bg-[#0F172A] disabled:opacity-50 transition-colors"
             >
               <Send className="w-4 h-4" />
             </button>

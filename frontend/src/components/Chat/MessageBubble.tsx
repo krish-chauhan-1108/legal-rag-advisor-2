@@ -65,16 +65,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   };
 
   return (
-    <div className={`flex w-full mb-6 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={`flex max-w-[85%] ${isUser ? 'flex-row-reverse' : 'flex-row'} gap-4`}>
+    <div className={`message-bubble flex w-full mb-6 ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div className={`message-bubble__row flex max-w-[85%] ${isUser ? 'flex-row-reverse' : 'flex-row'} gap-4`}>
         {/* Avatar */}
-        <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mt-1 shadow-sm ${isUser ? 'bg-[#1E293B]' : 'bg-white border border-gray-200'}`}>
+        <div className={`message-bubble__avatar flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mt-1 shadow-sm ${isUser ? 'bg-[#1E293B]' : 'bg-white border border-gray-200'}`}>
           {isUser ? <User size={16} color="white" /> : <Scale size={16} className="text-[#1E293B]" />}
         </div>
         
         {/* Bubble */}
-        <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} min-w-0`}>
-          <div className={`px-5 py-4 rounded-2xl shadow-sm ${
+        <div className={`message-bubble__content flex flex-col ${isUser ? 'items-end' : 'items-start'} min-w-0`}>
+          <div className={`message-bubble__bubble px-5 py-4 rounded-2xl shadow-sm ${
             isUser 
               ? 'bg-[#1E293B] text-white rounded-tr-none' 
               : 'bg-white border border-gray-100 rounded-tl-none text-gray-800'
@@ -122,7 +122,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           
           {/* Message metadata */}
           {(formattedMessageTime || (!isUser && (message.model_used || message.processing_time_seconds !== undefined))) && (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 ml-1 text-xs text-gray-400 font-medium">
+            <div className="message-bubble__metadata flex flex-wrap gap-x-4 gap-y-1 mt-3 ml-1 text-xs text-gray-400 font-medium">
               {!isUser && message.model_used && (
                 <span className="flex items-center gap-1.5">
                   <Cpu size={12} /> {modelLabel}

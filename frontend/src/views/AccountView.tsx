@@ -49,13 +49,13 @@ export const AccountView: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-white overflow-y-auto">
-      <header className="h-16 border-b border-gray-100 flex items-center px-8 flex-shrink-0">
+    <div className="account-view flex flex-col h-full bg-white overflow-y-auto">
+      <header className="account-view__header h-16 border-b border-gray-100 flex items-center px-8 flex-shrink-0">
         <h2 className="text-xl font-serif tracking-tight text-[#121212]">Account</h2>
       </header>
 
-      <div className="p-8 max-w-xl mx-auto w-full">
-        <div className="border border-gray-200 rounded-2xl p-8 shadow-sm">
+      <div className="account-view__content p-8 max-w-xl mx-auto w-full">
+        <div className="account-view__card border border-gray-200 rounded-2xl p-8 shadow-sm">
           {user ? (
             <>
               <div className="flex items-center gap-4 mb-8">
