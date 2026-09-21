@@ -4,10 +4,7 @@ import { Menu, Plus, Scale, Trash2, UserCircle, X } from 'lucide-react';
 import { SystemStatus } from '../components/Sidebar/SystemStatus';
 import type { ChatSession } from '../types';
 import { authFetch, useAuth } from '../auth/auth';
-
-const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
-// Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
-const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
+import { API_URL } from '../config';
 type ApiStatus = 'checking' | 'online' | 'offline';
 
 export const DashboardLayout: React.FC = () => {

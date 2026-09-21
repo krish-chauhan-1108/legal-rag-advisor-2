@@ -5,10 +5,7 @@ import { Send, Paperclip, FileText, X, Scale, AlertTriangle } from 'lucide-react
 import { MessageBubble } from '../components/Chat/MessageBubble';
 import type { ApplicableLaw, ChatMessage, ChatSession, StructuredAnalysis } from '../types';
 import { authFetch, authHeaders, useAuth } from '../auth/auth';
-
-const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
-// Production uses Vercel's same-origin proxy so browser extensions cannot block the Render hostname.
-const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
+import { API_URL } from '../config';
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
 
 const VERIFIED_QUOTE_STATUSES = new Set(['backend_verified', 'verified', 'source_verified']);
@@ -16,12 +13,6 @@ const VERIFIED_QUOTE_STATUSES = new Set(['backend_verified', 'verified', 'source
 const isVerifiedLaw = (law: ApplicableLaw): boolean => {
   const status = law.quote_status?.trim().toLowerCase();
   return law.verified === true && !!status && VERIFIED_QUOTE_STATUSES.has(status);
-};
-
-const getVerifiedText = (law: ApplicableLaw): string | null => {
-  if (!isVerifiedLaw(law)) return null;
-  const text = law.exact_text ?? law.quote ?? law.content;
-  return typeof text === 'string' && text.trim() ? text.trim() : null;
 };
 
 const formatSection = (section?: string | null, subsection?: string | null): string => {
@@ -47,22 +38,16 @@ const formatLegalLaw = (law: ApplicableLaw): string => {
   const title = [law.act ?? law.code, formatSection(law.section, law.subsection)]
     .filter(Boolean)
     .join(' — ') || 'Applicable law';
-  const verifiedText = getVerifiedText(law);
   const parts = [`### ${title}`];
 
-  if (verifiedText) {
-    parts.push(`**Verified statutory text**\n\n> ${verifiedText.replace(/\n/g, '\n> ')}`);
-  }
-
   if (law.explanation?.trim()) {
-    parts.push(`**Explanation**\n\n${law.explanation.trim()}`);
+    const explanation = law.explanation.trim().replace(/\s+/g, ' ');
+    parts.push(`**Explanation**\n\n${explanation.length > 280 ? `${explanation.slice(0, 277)}…` : explanation}`);
   }
 
   const sourceReference = formatSourceReference(law);
   if (sourceReference) {
     parts.push(`**Verified source:** ${sourceReference}`);
-  } else {
-    parts.push('**Source status**\n\n*Exact statutory wording could not be verified from the available source.*');
   }
 
   return parts.join('\n\n');

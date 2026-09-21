@@ -2,9 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { AuthUser } from '../types';
 import { AuthContext, SESSION_EXPIRED_EVENT } from './auth';
 import type { AuthContextValue } from './auth';
-
-const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
+import { API_URL } from '../config';
 const STORAGE_KEY = 'trana.auth';
 
 const readStoredSession = (): { credential: string; user: AuthUser } | null => {

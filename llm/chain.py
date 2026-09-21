@@ -71,6 +71,7 @@ def _verify_law_candidates(
     """Hydrate model candidates from the registry and discard model quotations."""
 
     source_chunks: list[SourceChunk] = []
+    verified_laws = []
     for law in analysis.applicable_laws:
         # Never trust quote/exact_text supplied by the provider, even if a model
         # ignores the prompt and returns a plausible-looking quotation.
@@ -108,6 +109,7 @@ def _verify_law_candidates(
         law.source_hash = record.source_hash
         law.quote_status = "backend_verified"
         law.verified = True
+        verified_laws.append(law)
 
         source_chunks.append(
             SourceChunk(
@@ -128,7 +130,10 @@ def _verify_law_candidates(
             )
         )
 
-    return source_chunks
+    # Keep the user-facing answer focused and never expose citations that the
+    # authoritative registry could not resolve.
+    analysis.applicable_laws = verified_laws[:3]
+    return source_chunks[:3]
 
 
 async def run_analysis_pipeline(

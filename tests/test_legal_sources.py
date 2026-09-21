@@ -48,7 +48,4 @@ def test_unknown_citation_cannot_become_verified() -> None:
     sources = _verify_law_candidates(analysis, get_registry())
 
     assert sources == []
-    assert law.verified is False
-    assert law.quote_status == "unverified"
-    assert law.quote == ""
-    assert law.exact_text is None
+    assert analysis.applicable_laws == []

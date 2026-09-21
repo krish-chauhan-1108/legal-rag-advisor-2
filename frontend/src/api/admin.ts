@@ -1,7 +1,5 @@
 import { authFetch } from '../auth/auth';
-
-const CONFIGURED_API_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const API_URL = import.meta.env.PROD ? '' : CONFIGURED_API_URL;
+import { API_URL } from '../config';
 
 export interface AdminAccess {
   authorized: boolean;
