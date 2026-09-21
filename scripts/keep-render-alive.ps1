@@ -3,11 +3,27 @@ param(
     [ValidateRange(60, 3600)]
     [int]$IntervalSeconds = 300,
     [ValidateRange(5, 120)]
-    [int]$TimeoutSeconds = 30
+    [int]$TimeoutSeconds = 30,
+    [switch]$Once
 )
 
 $ErrorActionPreference = "Stop"
-$healthUrl = "$($ApiUrl.TrimEnd('/'))/health"
+$normalizedApiUrl = $ApiUrl.Trim()
+if ($normalizedApiUrl.StartsWith('"') -and $normalizedApiUrl.EndsWith('"')) {
+    $normalizedApiUrl = $normalizedApiUrl.Substring(1, $normalizedApiUrl.Length - 2).Trim()
+}
+
+try {
+    $baseUri = [Uri]$normalizedApiUrl
+    if (-not $baseUri.IsAbsoluteUri -or $baseUri.Scheme -notin @('http', 'https')) {
+        throw "The API URL must be an absolute http(s) URL."
+    }
+}
+catch {
+    throw "Invalid API URL '$ApiUrl'. Use a value such as https://legal-rag-advisor-api.onrender.com"
+}
+
+$healthUrl = "$($normalizedApiUrl.TrimEnd('/'))/health"
 
 function Get-IndiaTime {
     $indiaTimeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById("India Standard Time")
@@ -16,27 +32,39 @@ function Get-IndiaTime {
 
 Write-Host "TRANA Render keep-alive started."
 Write-Host "Endpoint: $healthUrl"
-Write-Host "Interval: every $IntervalSeconds seconds"
+if ($Once) {
+    Write-Host "Mode: one request"
+}
+else {
+    Write-Host "Interval: every $IntervalSeconds seconds"
+}
 Write-Host "Press Ctrl+C to stop."
 Write-Host ""
 
 while ($true) {
-    $timestamp = (Get-IndiaTime).ToString("yyyy-MM-dd HH:mm:ss")
     $requestSucceeded = $false
 
     for ($attempt = 1; $attempt -le 3 -and -not $requestSucceeded; $attempt++) {
+        $timestamp = (Get-IndiaTime).ToString("yyyy-MM-dd HH:mm:ss")
         try {
+            $separator = if ($healthUrl.Contains('?')) { '&' } else { '?' }
+            $requestUrl = "$healthUrl$separator`ts=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
             $response = Invoke-WebRequest `
-                -Uri $healthUrl `
+                -Uri $requestUrl `
                 -Method Get `
                 -TimeoutSec $TimeoutSeconds `
+                -Headers @{ 'Cache-Control' = 'no-cache'; 'Pragma' = 'no-cache' } `
                 -UseBasicParsing
 
             $health = $response.Content | ConvertFrom-Json
             $indexed = if ($null -ne $health.documents_indexed) { $health.documents_indexed } else { "unknown" }
             $store = if ($null -ne $health.vector_store_ready) { $health.vector_store_ready } else { "unknown" }
 
-            Write-Host "[$timestamp IST] $($response.StatusCode) $($health.status) | indexed: $indexed | vector store ready: $store"
+            if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 400) {
+                throw "Health endpoint returned HTTP $($response.StatusCode)."
+            }
+
+            Write-Host "[$timestamp IST] Ping OK | HTTP $($response.StatusCode) | $($health.status) | indexed: $indexed | vector store ready: $store"
             $requestSucceeded = $true
         }
         catch {
@@ -48,6 +76,11 @@ while ($true) {
                 Write-Warning "[$timestamp IST] Keep-alive request failed after 3 attempts: $($_.Exception.Message)"
             }
         }
+    }
+
+    if ($Once) {
+        if (-not $requestSucceeded) { exit 1 }
+        exit 0
     }
 
     Start-Sleep -Seconds $IntervalSeconds
