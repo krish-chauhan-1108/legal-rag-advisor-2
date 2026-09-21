@@ -114,7 +114,7 @@ export const DashboardLayout: React.FC = () => {
       {/* Left Sidebar */}
       <aside className="w-72 bg-[#121212] text-white flex flex-col transition-all duration-300 flex-shrink-0">
         <div className="p-6 pb-2">
-          <div className="flex items-center gap-3 mb-8 cursor-pointer" onClick={() => navigate('/')}>
+          <div className="flex items-center gap-3 mb-8 cursor-pointer" onClick={() => navigate('/home')}>
             <Scale className="w-7 h-7 text-white" strokeWidth={1.5} />
             <h1 className="text-xl font-serif tracking-tight text-white">TRANA</h1>
           </div>
