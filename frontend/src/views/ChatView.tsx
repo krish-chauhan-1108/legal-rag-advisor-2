@@ -88,6 +88,16 @@ const ThinkingAnimation: React.FC = () => {
   );
 };
 
+const ChatLoadingScreen: React.FC = () => (
+  <div className="h-full flex flex-col items-center justify-center text-gray-500 animate-fade-in">
+    <div className="w-12 h-12 rounded-full border-4 border-gray-200 border-t-[#1E293B] animate-spin mb-5" />
+    <p className="text-base font-medium text-gray-700">Loading your chat...</p>
+    <p className="mt-2 text-sm text-gray-400 text-center max-w-xs">
+      The free backend may take a moment to wake up.
+    </p>
+  </div>
+);
+
 export const ChatView: React.FC = () => {
   const navigate = useNavigate();
   const { id: routeChatId } = useParams<{ id: string }>();
@@ -96,6 +106,7 @@ export const ChatView: React.FC = () => {
   const [input, setInput] = useState('');
   const [modelPref, setModelPref] = useState('deep');
   const [isLoading, setIsLoading] = useState(false);
+  const [isChatLoading, setIsChatLoading] = useState(false);
   const [ephemeralFile, setEphemeralFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -103,11 +114,16 @@ export const ChatView: React.FC = () => {
   useEffect(() => {
     let active = true;
 
-    if (!routeChatId || !credential) return () => {
-      active = false;
-    };
+    if (!routeChatId || !credential) {
+      setIsChatLoading(false);
+      return () => {
+        active = false;
+      };
+    }
 
     const loadChat = async () => {
+      setIsChatLoading(true);
+      setMessages([]);
       try {
         const response = await fetch(`${API_URL}/api/chats`, {
           headers: authHeaders(credential),
@@ -131,6 +147,8 @@ export const ChatView: React.FC = () => {
         })));
       } catch (error) {
         console.error('Failed to load chat history', error);
+      } finally {
+        if (active) setIsChatLoading(false);
       }
     };
 
@@ -146,7 +164,7 @@ export const ChatView: React.FC = () => {
   }, [messages]);
 
   const handleSend = async () => {
-    if ((!input.trim() && !ephemeralFile) || isLoading) return;
+    if ((!input.trim() && !ephemeralFile) || isLoading || isChatLoading) return;
     if (!credential) {
       navigate('/account');
       return;
@@ -260,7 +278,9 @@ export const ChatView: React.FC = () => {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {messages.length === 0 && (
+        {isChatLoading ? (
+          <ChatLoadingScreen />
+        ) : messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-gray-400">
             <Scale className="w-12 h-12 mb-4 opacity-20" />
             <p className="text-sm">{user ? 'Start a new legal inquiry...' : 'Sign in with Google to start chatting.'}</p>
@@ -305,7 +325,7 @@ export const ChatView: React.FC = () => {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
-              disabled={!user}
+              disabled={!user || isChatLoading}
               className="text-gray-400 hover:text-[#1E293B] transition-colors p-1"
               title="Attach document for this query only"
             >
@@ -318,7 +338,7 @@ export const ChatView: React.FC = () => {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder={user ? 'Ask a legal question or attach a document for immediate analysis...' : 'Sign in to ask TRANA a question...'}
-              disabled={!user}
+              disabled={!user || isChatLoading}
               className="flex-1 bg-transparent border-none focus:ring-0 text-[#121212] placeholder-gray-400 text-sm min-w-0 outline-none"
             />
             
