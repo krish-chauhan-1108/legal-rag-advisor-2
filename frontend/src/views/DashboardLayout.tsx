@@ -116,7 +116,7 @@ export const DashboardLayout: React.FC = () => {
         <div className="p-6 pb-2">
           <div className="flex items-center gap-3 mb-8 cursor-pointer" onClick={() => navigate('/')}>
             <Scale className="w-7 h-7 text-white" strokeWidth={1.5} />
-            <h1 className="text-xl font-serif tracking-tight">TRANA</h1>
+            <h1 className="text-xl font-serif tracking-tight text-white">TRANA</h1>
           </div>
           
           <button 

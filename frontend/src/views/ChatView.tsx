@@ -115,7 +115,6 @@ export const ChatView: React.FC = () => {
     let active = true;
 
     if (!routeChatId || !credential) {
-      setIsChatLoading(false);
       return () => {
         active = false;
       };
@@ -158,13 +157,14 @@ export const ChatView: React.FC = () => {
     };
   }, [credential, routeChatId]);
 
+  const shouldShowChatLoading = Boolean(routeChatId && credential && isChatLoading);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const handleSend = async () => {
-    if ((!input.trim() && !ephemeralFile) || isLoading || isChatLoading) return;
+    if ((!input.trim() && !ephemeralFile) || isLoading || shouldShowChatLoading) return;
     if (!credential) {
       navigate('/account');
       return;
@@ -278,7 +278,7 @@ export const ChatView: React.FC = () => {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {isChatLoading ? (
+        {shouldShowChatLoading ? (
           <ChatLoadingScreen />
         ) : messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-gray-400">
@@ -325,7 +325,7 @@ export const ChatView: React.FC = () => {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
-              disabled={!user || isChatLoading}
+              disabled={!user || shouldShowChatLoading}
               className="text-gray-400 hover:text-[#1E293B] transition-colors p-1"
               title="Attach document for this query only"
             >
@@ -338,7 +338,7 @@ export const ChatView: React.FC = () => {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder={user ? 'Ask a legal question or attach a document for immediate analysis...' : 'Sign in to ask TRANA a question...'}
-              disabled={!user || isChatLoading}
+              disabled={!user || shouldShowChatLoading}
               className="flex-1 bg-transparent border-none focus:ring-0 text-[#121212] placeholder-gray-400 text-sm min-w-0 outline-none"
             />
             
