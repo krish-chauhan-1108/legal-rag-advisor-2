@@ -208,11 +208,11 @@ export const DashboardLayout: React.FC = () => {
             <Menu className="h-5 w-5" />
             <span>Chats</span>
           </button>
+          <span className="dashboard-mobile-bar__spacer" />
           <button type="button" className="dashboard-mobile-bar__brand" onClick={() => navigate('/home')}>
             <Scale className="h-5 w-5" strokeWidth={1.5} />
             <span>TRANA</span>
           </button>
-          <span className="dashboard-mobile-bar__spacer" />
         </div>
         <div className="dashboard-outlet">
           <Outlet />
