@@ -89,6 +89,8 @@ class ChatMessageResponse(BaseModel):
     content: str
     structured_content: Optional[dict] = None
     sources: Optional[list] = None
+    model_used: Optional[str] = None
+    processing_time_seconds: Optional[float] = None
     created_at: str
 
 class ChatSessionResponse(BaseModel):

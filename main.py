@@ -52,6 +52,7 @@ from database import engine, get_db, Base
 import models.db_models as db_models
 import json
 import sqlite3
+from sqlalchemy import inspect, text
 
 print("[Progress] Loading schemas...")
 from models.schemas import (
@@ -103,6 +104,20 @@ def _auto_restore_seed_snapshot() -> None:
     logger.info("Bundled RAG seed snapshot restored (%s chunks)", _get_persisted_chunk_count())
 
 
+def _ensure_chat_message_metadata_columns() -> None:
+    """Add message stats columns to databases created before metadata existed."""
+    existing_columns = {column["name"] for column in inspect(engine).get_columns("chat_messages")}
+    missing_columns = {
+        "model_used": "VARCHAR",
+        "processing_time_seconds": "DOUBLE PRECISION",
+    }
+
+    with engine.begin() as connection:
+        for column_name, column_type in missing_columns.items():
+            if column_name not in existing_columns:
+                connection.execute(text(f"ALTER TABLE chat_messages ADD COLUMN {column_name} {column_type}"))
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Application Lifecycle
 # ═══════════════════════════════════════════════════════════════════════════
@@ -137,6 +152,7 @@ async def lifespan(app: FastAPI):
     
     print("[Progress] Initializing application database...")
     db_models.Base.metadata.create_all(bind=engine)
+    _ensure_chat_message_metadata_columns()
 
     print("[Progress] Application startup logic complete.")
     logger.info("Startup complete. Server ready on http://%s:%d", settings.host, settings.port)
@@ -262,6 +278,8 @@ def get_chats(user_email: str = Depends(get_current_user_email), db: Session = D
                 "content": m.content,
                 "structured_content": json.loads(m.structured_content) if m.structured_content else None,
                 "sources": json.loads(m.sources) if m.sources else None,
+                "model_used": m.model_used,
+                "processing_time_seconds": m.processing_time_seconds,
                 "created_at": m.created_at.isoformat()
             })
         res.append({
@@ -711,7 +729,9 @@ async def analyze(
                 role="assistant",
                 content="", # We use structured_content instead
                 structured_content=structured_json,
-                sources=sources_json
+                sources=sources_json,
+                model_used=response.model_used,
+                processing_time_seconds=response.processing_time_seconds,
             )
             db.add(assistant_msg)
             chat_session.updated_at = db_models.datetime.utcnow()

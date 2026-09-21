@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Scale, ChevronDown, ChevronUp, Clock, Cpu } from 'lucide-react';
+import { User, Scale, ChevronDown, ChevronUp, Clock, Cpu, CalendarClock } from 'lucide-react';
 import { marked } from 'marked';
 import type { ChatMessage } from '../../types';
 
@@ -35,6 +35,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const displayedContent = isUser ? message.content : animatedContent;
   const cleanContent = displayedContent.replace(/\|\n\n\|/g, '|\n|');
   const htmlContent = marked.parse(cleanContent) as string;
+  const modelLabel = message.model_used?.toLowerCase().includes('gemini')
+    ? 'Quick Thinking'
+    : 'Deep Thinking';
+  const formattedMessageTime = message.created_at
+    ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(message.created_at))
+    : null;
 
   const formatDocName = (name: string) => {
     if (name.includes('::')) {
@@ -100,15 +106,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
             </div>
           )}
           
-          {/* Render Model Metadata */}
-          {!isUser && message.model_used && (
-            <div className="flex gap-4 mt-3 ml-1 text-xs text-gray-400 font-medium">
-              <span className="flex items-center gap-1.5">
-                <Cpu size={12} /> {message.model_used}
-              </span>
-              {message.processing_time_seconds && (
+          {/* Message metadata */}
+          {(formattedMessageTime || (!isUser && (message.model_used || message.processing_time_seconds !== undefined))) && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 ml-1 text-xs text-gray-400 font-medium">
+              {!isUser && message.model_used && (
                 <span className="flex items-center gap-1.5">
-                  <Clock size={12} /> {message.processing_time_seconds.toFixed(2)}s
+                  <Cpu size={12} /> {modelLabel}
+                </span>
+              )}
+              {!isUser && message.processing_time_seconds !== undefined && message.processing_time_seconds !== null && (
+                <span className="flex items-center gap-1.5">
+                  <Clock size={12} /> {message.processing_time_seconds.toFixed(2)}s time taken
+                </span>
+              )}
+              {formattedMessageTime && (
+                <span className="flex items-center gap-1.5">
+                  <CalendarClock size={12} /> {isUser ? 'Prompt' : 'Sent'} {formattedMessageTime}
                 </span>
               )}
             </div>

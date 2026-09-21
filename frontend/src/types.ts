@@ -32,6 +32,7 @@ export interface ChatMessage {
   sources?: SourceChunk[];
   model_used?: string;
   processing_time_seconds?: number;
+  created_at?: string;
 }
 
 export interface PersistedChatMessage {
@@ -40,6 +41,8 @@ export interface PersistedChatMessage {
   content: string;
   structured_content?: StructuredAnalysis | null;
   sources?: SourceChunk[] | null;
+  model_used?: string | null;
+  processing_time_seconds?: number | null;
   created_at: string;
 }
 

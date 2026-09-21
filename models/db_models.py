@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime
+from sqlalchemy import Column, String, DateTime, Float
 from datetime import datetime
 import uuid
 from database import Base
@@ -31,4 +31,6 @@ class ChatMessage(Base):
     content = Column(String, nullable=False)
     structured_content = Column(String, nullable=True) # JSON string
     sources = Column(String, nullable=True) # JSON string
+    model_used = Column(String, nullable=True)
+    processing_time_seconds = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -125,6 +125,9 @@ export const ChatView: React.FC = () => {
             ? formatAnalysis(message.structured_content)
             : message.content,
           sources: message.sources ?? undefined,
+          model_used: message.model_used ?? undefined,
+          processing_time_seconds: message.processing_time_seconds ?? undefined,
+          created_at: message.created_at,
         })));
       } catch (error) {
         console.error('Failed to load chat history', error);
@@ -171,7 +174,7 @@ export const ChatView: React.FC = () => {
       setEphemeralFile(null); // clear after sending
     }
 
-    const newMessage: ChatMessage = { role: 'user', content: input };
+    const newMessage: ChatMessage = { role: 'user', content: input, created_at: new Date().toISOString() };
     setMessages(prev => [...prev, newMessage]);
     setInput('');
 
@@ -207,6 +210,7 @@ export const ChatView: React.FC = () => {
           sources: data.sources,
           model_used: data.model_used,
           processing_time_seconds: data.processing_time_seconds,
+          created_at: new Date().toISOString(),
         };
         setMessages(prev => [...prev, assistantMessage]);
         window.dispatchEvent(new Event('chat-history-updated'));

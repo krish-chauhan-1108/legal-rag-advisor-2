@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Scale, Plus, UserCircle } from 'lucide-react';
+import { Scale, Plus, UserCircle, Trash2 } from 'lucide-react';
 import { SystemStatus } from '../components/Sidebar/SystemStatus';
 import type { ChatSession } from '../types';
 import { authHeaders, useAuth } from '../auth/auth';
@@ -91,6 +91,24 @@ export const DashboardLayout: React.FC = () => {
     }
   };
 
+  const handleDeleteChat = async (event: React.MouseEvent, chat: ChatSession) => {
+    event.stopPropagation();
+    if (!credential || !window.confirm(`Delete “${chat.title || 'New Chat'}”?`)) return;
+
+    try {
+      const response = await fetch(`${API_URL}/api/chats/${chat.id}`, {
+        method: 'DELETE',
+        headers: authHeaders(credential),
+      });
+      if (!response.ok) throw new Error(`Chat deletion failed: ${response.status}`);
+
+      setChats(current => current.filter(candidate => candidate.id !== chat.id));
+      if (location.pathname === `/chat/${chat.id}`) navigate('/');
+    } catch {
+      window.alert('Could not delete this chat. Please try again.');
+    }
+  };
+
   return (
     <div className="flex h-screen bg-[#F9F9F8]">
       {/* Left Sidebar */}
@@ -112,14 +130,27 @@ export const DashboardLayout: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1 custom-scrollbar">
           {chats.map((chat) => (
-            <button
+            <div
               key={chat.id}
-              onClick={() => navigate(`/chat/${chat.id}`)}
-              className="w-full text-left px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-[#1E293B] rounded-md transition-colors truncate"
-              title={chat.title}
+              className="group relative flex items-center w-full rounded-md hover:bg-[#1E293B] transition-colors"
             >
-              {chat.title || 'New Chat'}
-            </button>
+              <button
+                onClick={() => navigate(`/chat/${chat.id}`)}
+                className="w-full text-left px-3 py-2.5 pr-10 text-sm text-gray-300 group-hover:text-white rounded-md transition-colors truncate"
+                title={chat.title}
+              >
+                {chat.title || 'New Chat'}
+              </button>
+              <button
+                type="button"
+                onClick={(event) => handleDeleteChat(event, chat)}
+                className="absolute right-2 rounded p-1 text-gray-500 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-300 transition-opacity"
+                title="Delete chat"
+                aria-label={`Delete ${chat.title || 'New Chat'}`}
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
           ))}
           {chats.length === 0 && (
             <p className="px-3 py-2 text-xs text-gray-500">No saved chats yet.</p>
