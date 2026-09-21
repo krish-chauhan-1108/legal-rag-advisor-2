@@ -66,7 +66,12 @@ from models.schemas import (
     GoogleAuthRequest,
     GoogleAuthResponse,
 )
-from key_manager import rotate_key
+from key_manager import (
+    QuickModelUnavailableError,
+    is_quota_error,
+    mark_quick_temporarily_unavailable,
+    rotate_key,
+)
 
 print("[Progress] Loading Logger...")
 from utils.logger import get_logger
@@ -704,7 +709,28 @@ async def analyze(
             model_preference=request.model_preference,
             ephemeral_context=request.ephemeral_context,
         )
+    except QuickModelUnavailableError as exc:
+        logger.warning("Quick Thinking unavailable: %s", exc)
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "QUICK_MODEL_UNAVAILABLE",
+                "message": str(exc),
+                "retry_after_seconds": 300,
+            },
+        )
     except RuntimeError as exc:
+        if request.model_preference == "quick" and is_quota_error(exc):
+            mark_quick_temporarily_unavailable()
+            logger.warning("Quick Thinking retrieval quota exhausted: %s", exc)
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "QUICK_MODEL_UNAVAILABLE",
+                    "message": "Quick Thinking is temporarily unavailable because Gemini Flash has reached the limit on all configured API keys.",
+                    "retry_after_seconds": 300,
+                },
+            )
         logger.error("Analysis pipeline failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
     except Exception as exc:

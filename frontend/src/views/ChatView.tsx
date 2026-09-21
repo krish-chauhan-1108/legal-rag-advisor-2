@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
-import { Send, Paperclip, FileText, X, Scale } from 'lucide-react';
+import { Send, Paperclip, FileText, X, Scale, AlertTriangle } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
 import type { ChatMessage, ChatSession, StructuredAnalysis } from '../types';
 import { authHeaders, useAuth } from '../auth/auth';
@@ -107,6 +107,7 @@ export const ChatView: React.FC = () => {
   const [modelPref, setModelPref] = useState('deep');
   const [isLoading, setIsLoading] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [quickUnavailable, setQuickUnavailable] = useState(false);
   const [ephemeralFile, setEphemeralFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -237,11 +238,28 @@ export const ChatView: React.FC = () => {
         }
       } else {
         let detail = 'The backend could not complete the analysis.';
+        let errorCode = '';
         try {
-          const err = await res.json();
-          if (typeof err?.detail === 'string') detail = err.detail;
+          const err = await res.json() as { detail?: unknown };
+          if (typeof err.detail === 'string') {
+            detail = err.detail;
+          } else if (err.detail && typeof err.detail === 'object') {
+            const structuredDetail = err.detail as { code?: unknown; message?: unknown };
+            errorCode = typeof structuredDetail.code === 'string' ? structuredDetail.code : '';
+            if (typeof structuredDetail.message === 'string') detail = structuredDetail.message;
+          }
         } catch {
           // Keep the user-facing fallback when the proxy returns a non-JSON error.
+        }
+
+        const quickIsUnavailable = res.status === 429 && (
+          errorCode === 'QUICK_MODEL_UNAVAILABLE' ||
+          detail.toLowerCase().includes('quick thinking')
+        );
+        if (quickIsUnavailable) {
+          setQuickUnavailable(true);
+          setModelPref('deep');
+          detail = 'Quick Thinking is temporarily unavailable because Gemini Flash has reached its limit on all configured API keys. Deep Thinking is still available.';
         }
         setMessages(prev => [...prev, {
           role: 'assistant',
@@ -271,9 +289,17 @@ export const ChatView: React.FC = () => {
             className="text-sm bg-white border border-gray-200 rounded-md px-3 py-1.5 outline-none text-gray-700 shadow-sm hover:border-gray-300 focus:border-[#1E293B] focus:ring-1 focus:ring-[#1E293B] transition-all cursor-pointer"
           >
             <option value="deep">Deep Thinking</option>
-            <option value="quick">Quick Thinking</option>
+            <option value="quick" disabled={quickUnavailable}>
+              {quickUnavailable ? 'Quick Thinking (temporarily unavailable)' : 'Quick Thinking'}
+            </option>
           </select>
         </div>
+        {quickUnavailable && (
+          <div className="mt-2 flex items-center justify-end gap-1.5 text-xs text-amber-700" role="status">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Quick Thinking is temporarily unavailable. Please use Deep Thinking for now.
+          </div>
+        )}
       </header>
 
       {/* Messages */}

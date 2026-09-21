@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
+import { ArrowLeft, Scale } from 'lucide-react';
 
 const lastUpdated = 'September 21, 2026';
 
@@ -9,10 +10,18 @@ export function LegalPage() {
   return (
     <main className="legal-page">
       <div className="legal-page__inner">
-        <Link to="/" className="legal-page__brand">TRANA</Link>
-        <p className="legal-page__eyebrow">{isPrivacy ? 'Privacy Policy' : 'Terms of Service'}</p>
-        <h1>{isPrivacy ? 'Your privacy matters.' : 'Clear terms for using TRANA.'}</h1>
-        <p className="legal-page__updated">Last updated: {lastUpdated}</p>
+        <div className="legal-page__topbar">
+          <Link to="/home" className="legal-page__brand">
+            <Scale className="h-5 w-5" strokeWidth={1.5} />
+            TRANA
+          </Link>
+          <Link to="/" className="legal-page__back"><ArrowLeft className="h-4 w-4" /> Back to chats</Link>
+        </div>
+
+        <article className="legal-page__card">
+          <p className="legal-page__eyebrow">{isPrivacy ? 'Privacy Policy' : 'Terms of Service'}</p>
+          <h1>{isPrivacy ? 'Your privacy matters.' : 'Clear terms for using TRANA.'}</h1>
+          <p className="legal-page__updated">Last updated: {lastUpdated}</p>
 
         {isPrivacy ? (
           <>
@@ -43,6 +52,8 @@ export function LegalPage() {
         )}
 
         <p className="legal-page__footer"><Link to="/privacy">Privacy Policy</Link><span>·</span><Link to="/terms">Terms of Service</Link><span>·</span><Link to="/">Return to TRANA</Link></p>
+          <div className="legal-page__footer"><Link to="/privacy">Privacy Policy</Link><span>·</span><Link to="/terms">Terms of Service</Link><span>·</span><Link to="/">Return to TRANA</Link></div>
+        </article>
       </div>
     </main>
   );

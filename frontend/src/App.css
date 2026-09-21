@@ -1,21 +1,52 @@
 /* Public legal pages */
 .legal-page {
   min-height: 100vh;
-  padding: 4rem 1.5rem;
-  background: var(--bg-primary);
+  padding: 2rem 1.5rem 4rem;
+  background: #F2F0EB;
 }
 
 .legal-page__inner {
-  max-width: 760px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
+.legal-page__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
 .legal-page__brand {
-  display: inline-block;
-  margin-bottom: 5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
   font-family: var(--font-serif);
   font-size: 1.25rem;
   font-weight: 700;
+  color: var(--text-primary);
+}
+
+.legal-page__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  transition: color var(--transition-fast);
+}
+
+.legal-page__back:hover {
+  color: var(--text-primary);
+}
+
+.legal-page__card {
+  padding: clamp(2rem, 5vw, 4.5rem);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1.25rem;
+  background: var(--bg-primary);
+  box-shadow: 0 20px 60px rgba(18, 18, 18, 0.06);
 }
 
 .legal-page__eyebrow {
@@ -29,6 +60,7 @@
   margin: 0.75rem 0;
   font-size: clamp(2.25rem, 6vw, 4rem);
   font-weight: 400;
+  letter-spacing: -0.03em;
 }
 
 .legal-page h2 {
@@ -59,10 +91,22 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin-top: 4rem;
+  margin-top: 3rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--border-subtle);
   font-size: 0.9rem;
+}
+
+/* The footer is now rendered as a div for the redesigned legal card. */
+.legal-page__card > p.legal-page__footer {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .legal-page__topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 /* Layout Framework */

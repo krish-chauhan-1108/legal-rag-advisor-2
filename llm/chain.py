@@ -33,7 +33,16 @@ from retrieval.hybrid_retriever import hybrid_retrieve, _is_junk_form
 from retrieval.bm25_retriever import ensure_bm25_ready
 from retrieval.reranker import filter_chunks_by_case, rerank
 from utils.logger import get_logger
-from key_manager import get_current_key, rotate_key
+from key_manager import (
+    AVAILABLE_KEYS,
+    QuickModelUnavailableError,
+    clear_quick_temporarily_unavailable,
+    get_current_key,
+    is_quota_error,
+    is_quick_temporarily_unavailable,
+    mark_quick_temporarily_unavailable,
+    rotate_key,
+)
 
 logger = get_logger(__name__)
 
@@ -94,6 +103,12 @@ async def run_analysis_pipeline(
 
     Stages: hybrid retrieval → reranking → context assembly → LLM generation.
     """
+    if model_preference == "quick" and is_quick_temporarily_unavailable():
+        raise QuickModelUnavailableError(
+            "Quick Thinking is temporarily unavailable because Gemini Flash "
+            "has reached the limit on all configured API keys."
+        )
+
     start_time = time.time()
 
     query_type = classify_query(query)
@@ -190,16 +205,26 @@ async def run_analysis_pipeline(
 
     messages.append(HumanMessage(content=full_prompt))
 
+    quick_key_attempts = 0
     while True:
         try:
             structured_llm = llm.with_structured_output(StructuredAnalysis)
             response = await structured_llm.ainvoke(messages)
             structured_analysis = response
+            if model_preference == "quick":
+                clear_quick_temporarily_unavailable()
             break
         except Exception as exc:
-            err_str = str(exc).lower()
-            if "429" in err_str or "quota" in err_str or "exhausted" in err_str or "rate limit" in err_str:
+            if is_quota_error(exc):
                 logger.warning("Rate limit hit during LLM generation. Attempting key rotation...")
+                if model_preference == "quick":
+                    quick_key_attempts += 1
+                    if quick_key_attempts >= max(1, len(AVAILABLE_KEYS)):
+                        mark_quick_temporarily_unavailable()
+                        raise QuickModelUnavailableError(
+                            "Quick Thinking is temporarily unavailable because Gemini Flash "
+                            "has reached the limit on all configured API keys."
+                        ) from exc
                 if rotate_key():
                     llm, actual_model_used = _get_llm(model_preference, force_reinit=True)
                     continue

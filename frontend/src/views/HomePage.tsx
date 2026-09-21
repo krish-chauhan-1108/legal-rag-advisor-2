@@ -54,10 +54,24 @@ export const HomePage: React.FC = () => {
               >
                 Continue as {user.name?.split(' ')[0] || 'user'}
               </button>
-            ) : (
-              <a href="#sign-in" className="rounded-lg bg-[#1E293B] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#0F172A]">
+            ) : !GOOGLE_CLIENT_ID ? (
+              <button
+                type="button"
+                onClick={() => setError('Google sign-in is not configured for this deployment yet.')}
+                className="rounded-lg bg-[#1E293B] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#0F172A]"
+              >
                 Sign in
-              </a>
+              </button>
+            ) : (
+              <div className={isSigningIn ? 'pointer-events-none opacity-50' : ''}>
+                <GoogleLogin
+                  onSuccess={(response) => void handleGoogleSuccess(response.credential)}
+                  onError={() => setError('Google sign-in was cancelled or could not start.')}
+                  theme="filled_black"
+                  size="medium"
+                  shape="rectangular"
+                />
+              </div>
             )}
           </div>
         </div>
