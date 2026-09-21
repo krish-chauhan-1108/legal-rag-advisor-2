@@ -102,6 +102,14 @@ class ChatSessionResponse(BaseModel):
     updated_at: str
 
 
+class ChatSessionSummaryResponse(BaseModel):
+    id: str
+    title: str
+    user_email: str
+    created_at: str
+    updated_at: str
+
+
 class GoogleAuthRequest(BaseModel):
     credential: str = Field(..., min_length=20)
 

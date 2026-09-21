@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { Send, Paperclip, FileText, X, Scale, AlertTriangle } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
@@ -154,9 +154,11 @@ const ChatLoadingScreen: React.FC = () => (
 
 export const ChatView: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id: routeChatId } = useParams<{ id: string }>();
   const { credential, user } = useAuth();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const preloadedMessages = (location.state as { preloadedMessages?: ChatMessage[] } | null)?.preloadedMessages;
+  const [messages, setMessages] = useState<ChatMessage[]>(() => preloadedMessages ?? []);
   const [input, setInput] = useState('');
   const [modelPref, setModelPref] = useState('deep');
   const [isLoading, setIsLoading] = useState(false);
@@ -175,20 +177,33 @@ export const ChatView: React.FC = () => {
       };
     }
 
+    if (preloadedMessages && preloadedMessages.length > 0) {
+      const historyState = window.history.state;
+      if (historyState && typeof historyState === 'object') {
+        window.history.replaceState(
+          { ...(historyState as Record<string, unknown>), usr: null },
+          '',
+          window.location.href,
+        );
+      }
+      return () => {
+        active = false;
+      };
+    }
+
     const loadChat = async () => {
       setIsChatLoading(true);
       setMessages([]);
       try {
-        const response = await authFetch(`${API_URL}/api/chats`, credential, {
+        const response = await authFetch(`${API_URL}/api/chats/${encodeURIComponent(routeChatId)}`, credential, {
           cache: 'no-store',
         });
         if (!response.ok) throw new Error(`Chat history failed: ${response.status}`);
 
-        const chats = await response.json() as ChatSession[];
-        const chat = chats.find((candidate) => candidate.id === routeChatId);
-        if (!active || !chat) return;
+        const chat = await response.json() as ChatSession;
+        if (!active) return;
 
-        setMessages(chat.messages.map((message) => ({
+        setMessages((chat.messages ?? []).map((message) => ({
           role: message.role,
           content: message.role === 'assistant' && message.structured_content
             ? formatAnalysis(message.structured_content)
@@ -209,7 +224,7 @@ export const ChatView: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [credential, routeChatId]);
+  }, [credential, routeChatId, location.state, preloadedMessages]);
 
   const shouldShowChatLoading = Boolean(routeChatId && credential && isChatLoading);
 
@@ -261,6 +276,7 @@ export const ChatView: React.FC = () => {
         if (!createResponse.ok) throw new Error('Could not create a chat session.');
         const createdChat = await createResponse.json() as ChatSession;
         activeChatId = createdChat.id;
+        window.dispatchEvent(new CustomEvent('chat-created', { detail: createdChat }));
       }
 
       const res = await authFetch(`${API_URL}/api/analyze`, credential, {
@@ -285,9 +301,11 @@ export const ChatView: React.FC = () => {
           created_at: new Date().toISOString(),
         };
         setMessages(prev => [...prev, assistantMessage]);
-        window.dispatchEvent(new Event('chat-history-updated'));
         if (!routeChatId && activeChatId) {
-          navigate(`/chat/${activeChatId}`, { replace: true });
+          navigate(`/chat/${activeChatId}`, {
+            replace: true,
+            state: { preloadedMessages: [...messages, newMessage, assistantMessage] },
+          });
         }
       } else {
         let detail = 'The backend could not complete the analysis.';

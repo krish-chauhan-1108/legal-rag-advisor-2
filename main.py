@@ -57,6 +57,7 @@ from models.schemas import (
     IngestionResponse,
     ChatSessionCreate,
     ChatSessionResponse,
+    ChatSessionSummaryResponse,
     ChatMessageResponse,
     GoogleAuthRequest,
     GoogleAuthResponse,
@@ -466,33 +467,47 @@ def admin_usage(
 # Chat Sessions API
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/chats", response_model=list[ChatSessionResponse], tags=["Chats"])
+@app.get("/api/chats", response_model=list[ChatSessionSummaryResponse], tags=["Chats"])
 def get_chats(user_email: str = Depends(get_current_user_email), db: Session = Depends(get_db)):
     sessions = db.query(db_models.ChatSession).filter(db_models.ChatSession.user_email == user_email).order_by(db_models.ChatSession.updated_at.desc()).all()
-    res = []
-    for s in sessions:
-        msgs = db.query(db_models.ChatMessage).filter(db_models.ChatMessage.session_id == s.id).order_by(db_models.ChatMessage.created_at.asc()).all()
-        parsed_msgs = []
-        for m in msgs:
-            parsed_msgs.append({
-                "id": m.id,
-                "role": m.role,
-                "content": m.content,
-                "structured_content": json.loads(m.structured_content) if m.structured_content else None,
-                "sources": json.loads(m.sources) if m.sources else None,
-                "model_used": m.model_used,
-                "processing_time_seconds": m.processing_time_seconds,
-                "created_at": m.created_at.isoformat()
-            })
-        res.append({
+    return [{
             "id": s.id,
             "title": s.title,
             "user_email": s.user_email,
-            "messages": parsed_msgs,
             "created_at": s.created_at.isoformat(),
             "updated_at": s.updated_at.isoformat()
-        })
-    return res
+        } for s in sessions]
+
+
+@app.get("/api/chats/{chat_id}", response_model=ChatSessionResponse, tags=["Chats"])
+def get_chat(chat_id: str, user_email: str = Depends(get_current_user_email), db: Session = Depends(get_db)):
+    session = db.query(db_models.ChatSession).filter(
+        db_models.ChatSession.id == chat_id,
+        db_models.ChatSession.user_email == user_email,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    messages = db.query(db_models.ChatMessage).filter(
+        db_models.ChatMessage.session_id == session.id,
+    ).order_by(db_models.ChatMessage.created_at.asc()).all()
+    return {
+        "id": session.id,
+        "title": session.title,
+        "user_email": session.user_email,
+        "messages": [{
+            "id": message.id,
+            "role": message.role,
+            "content": message.content,
+            "structured_content": json.loads(message.structured_content) if message.structured_content else None,
+            "sources": json.loads(message.sources) if message.sources else None,
+            "model_used": message.model_used,
+            "processing_time_seconds": message.processing_time_seconds,
+            "created_at": message.created_at.isoformat(),
+        } for message in messages],
+        "created_at": session.created_at.isoformat(),
+        "updated_at": session.updated_at.isoformat(),
+    }
 
 @app.post("/api/chats", response_model=ChatSessionResponse, tags=["Chats"])
 def create_chat(chat_in: ChatSessionCreate, user_email: str = Depends(get_current_user_email), db: Session = Depends(get_db)):

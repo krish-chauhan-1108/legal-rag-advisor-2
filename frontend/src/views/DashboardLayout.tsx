@@ -71,17 +71,30 @@ export const DashboardLayout: React.FC = () => {
         const data = await response.json() as ChatSession[];
         if (active) setChats(Array.isArray(data) ? data : []);
       } catch {
-        if (active) setChats([]);
+        // Keep the last good sidebar state during transient backend wake-ups.
+        // A failed refresh should not make saved chats disappear.
       }
     };
 
     loadChats();
-    window.addEventListener('chat-history-updated', loadChats);
+    const handleChatCreated = (event: Event) => {
+      const chat = (event as CustomEvent<ChatSession>).detail;
+      if (!chat?.id) return;
+      setChats(current => [chat, ...current.filter(candidate => candidate.id !== chat.id)]);
+    };
+
+    const handleHistoryUpdated = () => {
+      void loadChats();
+    };
+
+    window.addEventListener('chat-created', handleChatCreated);
+    window.addEventListener('chat-history-updated', handleHistoryUpdated);
     return () => {
       active = false;
-      window.removeEventListener('chat-history-updated', loadChats);
+      window.removeEventListener('chat-created', handleChatCreated);
+      window.removeEventListener('chat-history-updated', handleHistoryUpdated);
     };
-  }, [credential, location.pathname]);
+  }, [credential]);
 
   const handleNewChat = () => {
     setIsMobileNavOpen(false);

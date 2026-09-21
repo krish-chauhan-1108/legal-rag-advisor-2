@@ -81,7 +81,7 @@ export interface ChatSession {
   id: string;
   title: string;
   user_email: string;
-  messages: PersistedChatMessage[];
+  messages?: PersistedChatMessage[];
   created_at: string;
   updated_at: string;
 }
