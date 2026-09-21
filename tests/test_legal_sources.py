@@ -3,6 +3,15 @@ from llm.chain import _verify_law_candidates
 from models.schemas import ApplicableLaw, StructuredAnalysis
 
 
+def test_full_supported_act_coverage_is_loaded() -> None:
+    registry = get_registry()
+
+    assert len(registry) == 1062
+    assert registry.lookup("BNS", "358") is not None
+    assert registry.lookup("BNSS", "531") is not None
+    assert registry.lookup("BSA", "170") is not None
+
+
 def test_registry_validates_and_resolves_subsection() -> None:
     registry = get_registry()
     record = registry.lookup("BNS", "1", subsection="1")
