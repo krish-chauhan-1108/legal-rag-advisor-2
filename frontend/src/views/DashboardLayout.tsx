@@ -119,7 +119,10 @@ export const DashboardLayout: React.FC = () => {
         aria-hidden="true"
       />
       {/* Left Sidebar */}
-      <aside className={`dashboard-sidebar w-72 bg-[#121212] text-white flex flex-col transition-all duration-300 flex-shrink-0 ${isMobileNavOpen ? 'is-open' : ''}`}>
+      <aside
+        id="trana-chat-sidebar"
+        className={`dashboard-sidebar w-72 bg-[#121212] text-white flex flex-col transition-all duration-300 flex-shrink-0 ${isMobileNavOpen ? 'is-open' : ''}`}
+      >
         <div className="p-6 pb-2">
           <div className="dashboard-sidebar__top flex items-center gap-3 mb-8 cursor-pointer" onClick={() => { setIsMobileNavOpen(false); navigate('/home'); }}>
             <Scale className="w-7 h-7 text-white" strokeWidth={1.5} />
@@ -194,8 +197,16 @@ export const DashboardLayout: React.FC = () => {
       {/* Main Content Area */}
       <main className="dashboard-main flex-1 flex flex-col overflow-hidden relative">
         <div className="dashboard-mobile-bar">
-          <button type="button" onClick={() => setIsMobileNavOpen(true)} aria-label="Open navigation">
+          <button
+            type="button"
+            className="dashboard-mobile-bar__menu"
+            onClick={() => setIsMobileNavOpen(true)}
+            aria-label="Open chats and navigation"
+            aria-controls="trana-chat-sidebar"
+            aria-expanded={isMobileNavOpen}
+          >
             <Menu className="h-5 w-5" />
+            <span>Chats</span>
           </button>
           <button type="button" className="dashboard-mobile-bar__brand" onClick={() => navigate('/home')}>
             <Scale className="h-5 w-5" strokeWidth={1.5} />

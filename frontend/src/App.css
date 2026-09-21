@@ -640,7 +640,7 @@
 .message-bubble__metadata { max-width: 100%; }
 .message-bubble__metadata span { max-width: 100%; overflow-wrap: anywhere; }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .dashboard-shell { height: 100dvh; }
   .dashboard-sidebar {
     position: fixed;
@@ -686,16 +686,21 @@
     backdrop-filter: blur(12px);
     z-index: 20;
   }
-  .dashboard-mobile-bar > button:first-child {
-    display: inline-grid;
-    place-items: center;
-    width: 2.75rem;
+  .dashboard-mobile-bar__menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-width: 2.75rem;
     height: 2.75rem;
+    padding: 0 0.75rem;
     border-radius: 0.65rem;
     color: #1e293b;
+    font-size: 0.82rem;
+    font-weight: 600;
   }
-  .dashboard-mobile-bar > button:first-child:hover,
-  .dashboard-mobile-bar > button:first-child:focus-visible { background: #f1f5f9; }
+  .dashboard-mobile-bar__menu:hover,
+  .dashboard-mobile-bar__menu:focus-visible { background: #f1f5f9; }
   .dashboard-mobile-bar__brand {
     display: inline-flex;
     align-items: center;
