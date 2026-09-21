@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Send, Paperclip, FileText, X, Scale, AlertTriangle } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
 import type { ApplicableLaw, ChatMessage, ChatSession, StructuredAnalysis } from '../types';
-import { authFetch, authHeaders, useAuth } from '../auth/auth';
+import { authFetch, authHeaders, notifyApiOnline, useAuth } from '../auth/auth';
 import { API_URL } from '../config';
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
 
@@ -237,6 +237,7 @@ export const ChatView: React.FC = () => {
           body: formData
         });
         if (res.ok) {
+          notifyApiOnline();
           const data = await res.json();
           ephemeralContext = data.text;
         }
@@ -276,6 +277,7 @@ export const ChatView: React.FC = () => {
       });
 
       if (res.ok) {
+        notifyApiOnline(true);
         const data = await res.json();
         const assistantMessage: ChatMessage = {
           role: 'assistant',

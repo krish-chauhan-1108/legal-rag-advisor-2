@@ -2,6 +2,15 @@ import { createContext, useContext } from 'react';
 import type { AuthUser } from '../types';
 
 export const SESSION_EXPIRED_EVENT = 'trana:session-expired';
+export const API_ONLINE_EVENT = 'trana:api-online';
+
+export const notifyApiOnline = (sourceRegistryReady = false): void => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(API_ONLINE_EVENT, {
+      detail: { sourceRegistryReady },
+    }));
+  }
+};
 
 export interface AuthContextValue {
   credential: string | null;
@@ -43,6 +52,8 @@ export const authFetch = async (
   if (response.status === 401 && typeof window !== 'undefined') {
     window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
   }
+
+  if (response.ok) notifyApiOnline();
 
   return response;
 };

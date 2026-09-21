@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, Plus, Scale, Trash2, UserCircle, X } from 'lucide-react';
 import { SystemStatus } from '../components/Sidebar/SystemStatus';
 import type { ChatSession } from '../types';
-import { authFetch, useAuth } from '../auth/auth';
+import { API_ONLINE_EVENT, authFetch, useAuth } from '../auth/auth';
 import { API_URL } from '../config';
 type ApiStatus = 'checking' | 'online' | 'offline';
 
@@ -19,11 +19,25 @@ export const DashboardLayout: React.FC = () => {
     let active = true;
     let requestInFlight = false;
 
+    const handleApiOnline = (event: Event) => {
+      const sourceRegistryReady = (event as CustomEvent<{ sourceRegistryReady?: boolean }>).detail?.sourceRegistryReady;
+      if (active) {
+        setHealth(current => ({
+          status: 'online',
+          sourceRegistryReady: sourceRegistryReady ? true : current.sourceRegistryReady,
+        }));
+      }
+    };
+
+    window.addEventListener(API_ONLINE_EVENT, handleApiOnline);
+
     const checkHealth = async () => {
       if (requestInFlight) return;
       requestInFlight = true;
 
-      if (active) setHealth(current => ({ ...current, status: 'checking' }));
+      if (active) {
+        setHealth(current => current.status === 'online' ? current : { ...current, status: 'checking' });
+      }
 
       try {
         const response = await fetch(`${API_URL}/health?ts=${Date.now()}`, { cache: 'no-store' });
@@ -37,7 +51,9 @@ export const DashboardLayout: React.FC = () => {
           });
         }
       } catch {
-        if (active) setHealth(current => ({ ...current, status: 'offline' }));
+        if (active) {
+          setHealth(current => current.status === 'online' ? current : { ...current, status: 'offline' });
+        }
       } finally {
         requestInFlight = false;
       }
@@ -48,6 +64,7 @@ export const DashboardLayout: React.FC = () => {
     return () => {
       active = false;
       clearInterval(interval);
+      window.removeEventListener(API_ONLINE_EVENT, handleApiOnline);
     };
   }, []);
 
