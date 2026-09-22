@@ -41,16 +41,10 @@ PROVIDER_ENV_FIELDS = {
         ("GROQ_API_KEY_2", "Groq environment key 2"),
         ("GROQ_API_KEY_3", "Groq environment key 3"),
     ),
-    "nvidia": (
-        ("NVIDIA_API_KEY", "NVIDIA environment key 1"),
-        ("NVIDIA_API_KEY_2", "NVIDIA environment key 2"),
-        ("NVIDIA_API_KEY_3", "NVIDIA environment key 3"),
-    ),
 }
 PROVIDER_ENV_DEFAULT_MODELS = {
     "cerebras": "gpt-oss-120b",
     "groq": "openai/gpt-oss-120b",
-    "nvidia": "nvidia/nemotron-3.5-lightning-30b-a3b",
 }
 IST = ZoneInfo("Asia/Kolkata")
 QUICK_UNAVAILABLE_COOLDOWN_SECONDS = 300

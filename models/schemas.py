@@ -221,8 +221,8 @@ class AnalysisRequest(BaseModel):
     )
 
     model_preference: Optional[str] = Field(
-        default="deep",
-        description="Model preference: 'deep' for 31B or 'quick' for 2.5-flash.",
+        default="quick",
+        description="Compatibility field; TRANA uses the Quick Thinking provider rotation.",
     )
     ephemeral_context: Optional[str] = Field(
         default=None,

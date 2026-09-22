@@ -145,7 +145,6 @@ export const ChatView: React.FC = () => {
   const preloadedMessages = (location.state as { preloadedMessages?: ChatMessage[] } | null)?.preloadedMessages;
   const [messages, setMessages] = useState<ChatMessage[]>(() => preloadedMessages ?? []);
   const [input, setInput] = useState('');
-  const [modelPref, setModelPref] = useState('deep');
   const [isLoading, setIsLoading] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [quickUnavailable, setQuickUnavailable] = useState(false);
@@ -271,7 +270,7 @@ export const ChatView: React.FC = () => {
         body: JSON.stringify({
           query: newMessage.content || "Analyze the attached document.",
           ephemeral_context: ephemeralContext,
-          model_preference: modelPref,
+          model_preference: 'quick',
           chat_id: activeChatId,
         })
       });
@@ -316,8 +315,7 @@ export const ChatView: React.FC = () => {
         );
         if (quickIsUnavailable) {
           setQuickUnavailable(true);
-          setModelPref('deep');
-          detail = 'Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited. Deep Thinking is still available.';
+          detail = 'Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited.';
         }
         setMessages(prev => [...prev, {
           role: 'assistant',
@@ -339,23 +337,10 @@ export const ChatView: React.FC = () => {
       {/* Header */}
       <header className="chat-view__header h-16 border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0 z-10 bg-white/80 backdrop-blur-sm">
         <h2 className="text-lg font-serif tracking-tight text-[#121212]">Legal Analysis</h2>
-        <div className="chat-view__model flex items-center gap-2">
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Model:</span>
-          <select
-            value={modelPref}
-            onChange={e => setModelPref(e.target.value)}
-            className="text-sm bg-white border border-gray-200 rounded-md px-3 py-1.5 outline-none text-gray-700 shadow-sm hover:border-gray-300 focus:border-[#1E293B] focus:ring-1 focus:ring-[#1E293B] transition-all cursor-pointer"
-          >
-            <option value="deep">Deep Thinking</option>
-            <option value="quick" disabled={quickUnavailable}>
-              {quickUnavailable ? 'Quick Thinking (temporarily unavailable)' : 'Quick Thinking'}
-            </option>
-          </select>
-        </div>
         {quickUnavailable && (
           <div className="chat-view__alert mt-2 flex items-center justify-end gap-1.5 text-xs text-amber-700" role="status">
             <AlertTriangle className="h-3.5 w-3.5" />
-            Quick Thinking is temporarily unavailable. Please try again shortly or use Deep Thinking for now.
+            Quick Thinking is temporarily unavailable. Please try again shortly.
           </div>
         )}
       </header>

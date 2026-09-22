@@ -4,15 +4,11 @@ import { Send } from 'lucide-react';
 interface InputAreaProps {
   onSendMessage: (query: string) => void;
   isLoading: boolean;
-  modelPreference: string;
-  setModelPreference: (pref: string) => void;
 }
 
 export const InputArea: React.FC<InputAreaProps> = ({ 
   onSendMessage, 
   isLoading, 
-  modelPreference, 
-  setModelPreference 
 }) => {
   const [query, setQuery] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -47,15 +43,6 @@ export const InputArea: React.FC<InputAreaProps> = ({
 
   return (
     <div>
-      <div className="input-controls">
-        <select 
-          value={modelPreference} 
-          onChange={(e) => setModelPreference(e.target.value)}
-        >
-          <option value="deep">Deep Thinking</option>
-          <option value="quick">Quick Thinking</option>
-        </select>
-      </div>
       <div className={`input-bar ${isLoading ? 'opacity-50' : ''}`}>
         <textarea
           ref={textareaRef}

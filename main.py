@@ -996,7 +996,7 @@ async def analyze(
             query=request.query,
             document_filter=request.document_filter,
             top_k=request.top_k,
-            model_preference=request.model_preference,
+            model_preference="quick",
             ephemeral_context=request.ephemeral_context,
         )
     except QuickModelUnavailableError as exc:
@@ -1010,7 +1010,7 @@ async def analyze(
             },
         )
     except RuntimeError as exc:
-        if request.model_preference == "quick" and is_quota_error(exc):
+        if is_quota_error(exc):
             mark_quick_temporarily_unavailable()
             logger.warning("Quick Thinking retrieval quota exhausted: %s", exc)
             raise HTTPException(

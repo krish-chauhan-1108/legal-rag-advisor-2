@@ -9,15 +9,13 @@ interface ChatDrawerProps {
   messages: ChatMessage[];
   onSendMessage: (query: string) => void;
   isLoading: boolean;
-  modelPreference: string;
-  setModelPreference: (pref: string) => void;
   onUpload: (file: File) => Promise<void>;
   isUploading: boolean;
   uploadProgress: number;
 }
 
 export const ChatDrawer: React.FC<ChatDrawerProps> = ({
-  isOpen, onClose, messages, onSendMessage, isLoading, modelPreference, setModelPreference, onUpload, isUploading, uploadProgress
+  isOpen, onClose, messages, onSendMessage, isLoading, onUpload, isUploading, uploadProgress
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -134,14 +132,6 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
 
         {/* Input Area */}
         <div className="drawer-input-container">
-          <select 
-            className="model-select"
-            value={modelPreference} 
-            onChange={(e) => setModelPreference(e.target.value)}
-          >
-            <option value="deep">Deep Thinking</option>
-            <option value="quick">Quick Thinking</option>
-          </select>
           <div className="transcript-input">
             <textarea 
               ref={inputRef}

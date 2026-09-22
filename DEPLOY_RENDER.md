@@ -1,8 +1,7 @@
 # Free deployment checklist
 
-TRANA uses direct provider analysis. Quick Thinking tries configured GPT-OSS
-providers first, then Llama-compatible routes, while Deep Thinking remains
-Google/Gemma-compatible. The normal chat path does not load a local
+TRANA uses direct Quick Thinking provider analysis. It tries configured GPT-OSS
+providers first, then Llama-compatible routes. The normal chat path does not load a local
 vector database, embeddings, BM25, or a reranker.
 
 ## 1. Deploy the backend on Render
@@ -14,7 +13,7 @@ vector database, embeddings, BM25, or a reranker.
    `GEMINI_API_KEY`, `GEMINI_API_KEY_FALLBACK`, `GEMINI_API_KEY_3`, and
    `GEMINI_API_KEY_4`.
    Optional provider bootstrap variables are `GROQ_API_KEY`,
-   `CEREBRAS_API_KEY`, and `NVIDIA_API_KEY`; additional keys and all routing
+   `CEREBRAS_API_KEY`; additional keys and all routing
    priority should be managed through the private admin console.
 5. Set `GOOGLE_CLIENT_ID` to the OAuth web-client ID used by the frontend.
 6. Open `/health` and confirm `status` is `healthy` and

@@ -27,11 +27,10 @@ def test_quick_routes_prioritize_gpt_oss_then_llama(monkeypatch):
         lambda: {
             ("cerebras", "llama3.1-8b", "quick"): [_record("llama", "cerebras", "llama3.1-8b")],
             ("groq", "openai/gpt-oss-120b", "quick"): [_record("oss", "groq", "openai/gpt-oss-120b")],
-            ("nvidia", "nvidia/nemotron-3.5-lightning-30b-a3b", "quick"): [_record("nemotron", "nvidia", "nvidia/nemotron-3.5-lightning-30b-a3b")],
         },
     )
 
-    assert [record.id for record in chain._quick_routes()] == ["oss", "nemotron", "llama"]
+    assert [record.id for record in chain._quick_routes()] == ["oss", "llama"]
 
 
 def test_groq_json_mode_handles_wrapped_structured_content(monkeypatch):

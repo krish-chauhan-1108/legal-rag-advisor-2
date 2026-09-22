@@ -46,7 +46,6 @@ _REPEATED_WORDS = re.compile(r"\b(\w+)(?:\s+\1){2,}\b", re.IGNORECASE)
 _PROVIDER_BASE_URLS = {
     "groq": "https://api.groq.com/openai/v1",
     "cerebras": "https://api.cerebras.ai/v1",
-    "nvidia": "https://integrate.api.nvidia.com/v1",
 }
 
 
@@ -62,21 +61,19 @@ def _model_family(model: str) -> str:
 def _quick_routes():
     """Return active Quick Thinking records in model-family priority order."""
 
-    provider_order = {"groq": 0, "cerebras": 1, "nvidia": 2, "google": 3}
+    provider_order = {"groq": 0, "cerebras": 1, "google": 2}
     routes = []
     for (provider, model, mode), records in get_active_provider_pools().items():
-        if mode != "quick":
+        if mode != "quick" or provider not in provider_order:
             continue
         for record in records:
             family = _model_family(model)
             if family == "gpt-oss":
                 route_priority = 0
-            elif provider == "nvidia":
-                route_priority = 1
             elif family == "llama":
-                route_priority = 2
+                route_priority = 1
             else:
-                route_priority = 3
+                route_priority = 2
             routes.append((
                 route_priority,
                 provider_order.get(provider, 9),
@@ -420,7 +417,7 @@ async def run_analysis_pipeline(
     query: str,
     document_filter: Optional[str] = None,
     top_k: Optional[int] = None,
-    model_preference: Optional[str] = "deep",
+    model_preference: Optional[str] = "quick",
     user_id: Optional[str] = None,
     ephemeral_context: Optional[str] = None,
     source_registry: LawSourceRegistry | None = None,
@@ -432,7 +429,8 @@ async def run_analysis_pipeline(
     ``ephemeral_context`` is still passed to the model as user-provided context.
     """
 
-    del document_filter, top_k, user_id
+    del document_filter, top_k, user_id, model_preference
+    model_preference = "quick"
 
     if model_preference == "quick" and is_quick_temporarily_unavailable() and not _quick_routes():
         raise QuickModelUnavailableError(

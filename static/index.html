@@ -784,12 +784,6 @@
       </div>
 
       <!-- ── Input Bar ──────────────────────────────────────────── -->
-      <div class="input-controls" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; justify-content: flex-end;">
-         <select id="modelPreference" style="background: var(--bg-glass); border: 1px solid var(--border-glass); color: var(--text-secondary); padding: 0.4rem 0.8rem; border-radius: var(--radius-sm); font-size: 0.8rem; outline: none; cursor: pointer;">
-            <option value="deep">🧠 Deep Thinking (Gemma 31B)</option>
-            <option value="quick">⚡ Quick Response (Flash 2.5)</option>
-         </select>
-      </div>
       <div class="input-bar">
         <textarea
           id="queryInput"
@@ -994,8 +988,6 @@
       // Add typing indicator
       const typingEl = appendTypingIndicator();
 
-      const modelPreference = document.getElementById('modelPreference').value;
-
       try {
         const res = await fetch(`${API_BASE}/api/analyze`, {
           method: 'POST',
@@ -1003,7 +995,7 @@
           body: JSON.stringify({ 
              query, 
              chat_history: currentHistory,
-             model_preference: modelPreference 
+             model_preference: 'quick'
           }),
         });
 

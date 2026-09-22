@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Scale, ChevronDown, ChevronUp, Clock, Cpu, CalendarClock } from 'lucide-react';
+import { User, Scale, ChevronDown, ChevronUp, Clock, CalendarClock } from 'lucide-react';
 import { marked } from 'marked';
 import type { ChatMessage, SourceChunk } from '../../types';
 
@@ -88,13 +88,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const displayedContent = isUser ? message.content : animatedContent;
   const cleanContent = displayedContent.replace(/\|\n\n\|/g, '|\n|');
   const htmlContent = marked.parse(cleanContent) as string;
-  const normalizedModel = message.model_used?.toLowerCase() || '';
-  const modelLabel = normalizedModel.startsWith('quick:')
-    || normalizedModel.includes('flash')
-    || normalizedModel.includes('gpt-oss')
-    || normalizedModel.includes('llama')
-    ? 'Quick Thinking'
-    : 'Deep Thinking';
   const formattedMessageTime = message.created_at
     ? formatMessageTime(message.created_at)
     : null;
@@ -188,13 +181,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           )}
           
           {/* Message metadata */}
-          {(formattedMessageTime || (!isUser && (message.model_used || message.processing_time_seconds !== undefined))) && (
+          {(formattedMessageTime || (!isUser && message.processing_time_seconds !== undefined)) && (
             <div className="message-bubble__metadata flex flex-wrap gap-x-4 gap-y-1 mt-3 ml-1 text-xs text-gray-400 font-medium">
-              {!isUser && message.model_used && (
-                <span className="flex items-center gap-1.5">
-                  <Cpu size={12} /> {modelLabel}
-                </span>
-              )}
               {!isUser && message.processing_time_seconds !== undefined && message.processing_time_seconds !== null && (
                 <span className="flex items-center gap-1.5">
                   <Clock size={12} /> {message.processing_time_seconds.toFixed(2)}s time taken

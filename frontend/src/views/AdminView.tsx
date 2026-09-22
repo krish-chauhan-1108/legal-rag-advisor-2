@@ -31,7 +31,7 @@ interface KeyFormState {
   apiKey: string;
   provider: string;
   model: string;
-  mode: 'quick' | 'deep';
+  mode: 'quick';
   baseUrl: string;
   rotationOrder: string;
 }
@@ -47,13 +47,6 @@ const formatIst = (value?: string | null): string => {
     timeStyle: 'short',
     timeZone: 'Asia/Kolkata',
   }).format(date) + ' IST';
-};
-
-const modelLabel = (model: string): string => {
-  const normalized = model.toLowerCase();
-  if (normalized.includes('flash') || normalized.includes('quick')) return 'Quick Thinking';
-  if (normalized.includes('gemma') || normalized.includes('deep')) return 'Deep Thinking';
-  return model;
 };
 
 const getErrorText = (error: unknown, fallback: string): string => (
@@ -202,11 +195,8 @@ export const AdminView: React.FC = () => {
     usage.forEach((row) => {
       const current = grouped.get(row.keyId) || new Map([
         ['__quick__', { label: 'Quick Thinking', minute: { ...EMPTY_BUCKET }, day: { ...EMPTY_BUCKET } }],
-        ['__deep__', { label: 'Deep Thinking', minute: { ...EMPTY_BUCKET }, day: { ...EMPTY_BUCKET } }],
       ]);
-      const label = modelLabel(row.model);
-      const modelKey = label === 'Quick Thinking' ? '__quick__' : label === 'Deep Thinking' ? '__deep__' : row.model;
-      current.set(modelKey, { label, minute: row.minute, day: row.day });
+      current.set(row.model, { label: row.model, minute: row.minute, day: row.day });
       grouped.set(row.keyId, current);
     });
     return grouped;
@@ -332,7 +322,6 @@ export const AdminView: React.FC = () => {
                 <select value={form.provider} onChange={(event) => setForm(current => ({ ...current, provider: event.target.value }))}>
                   <option value="groq">Groq</option>
                   <option value="cerebras">Cerebras</option>
-                  <option value="nvidia">NVIDIA</option>
                   <option value="google">Google</option>
                   <option value="llama">Llama-compatible</option>
                 </select>
@@ -340,13 +329,6 @@ export const AdminView: React.FC = () => {
               <label className="admin-field">
                 <span>Model ID</span>
                 <input value={form.model} onChange={(event) => setForm(current => ({ ...current, model: event.target.value }))} placeholder="openai/gpt-oss-120b" />
-              </label>
-              <label className="admin-field">
-                <span>Mode</span>
-                <select value={form.mode} onChange={(event) => setForm(current => ({ ...current, mode: event.target.value as 'quick' | 'deep' }))}>
-                  <option value="quick">Quick Thinking</option>
-                  <option value="deep">Deep Thinking</option>
-                </select>
               </label>
               <label className="admin-field admin-field--wide">
                 <span>Custom base URL (optional)</span>
@@ -418,7 +400,6 @@ export const AdminView: React.FC = () => {
               keys.map((keyRecord) => {
                 const keyUsage = usageByKey.get(keyRecord.id) || new Map([
                   ['__quick__', { label: 'Quick Thinking', minute: { ...EMPTY_BUCKET }, day: { ...EMPTY_BUCKET } }],
-                  ['__deep__', { label: 'Deep Thinking', minute: { ...EMPTY_BUCKET }, day: { ...EMPTY_BUCKET } }],
                 ]);
                 const modelUsages = Array.from(keyUsage.values());
                 return (
