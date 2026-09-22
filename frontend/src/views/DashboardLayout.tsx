@@ -245,7 +245,7 @@ export const DashboardLayout: React.FC = () => {
           </button>
         </div>
         <div className="dashboard-outlet">
-          <Outlet />
+          <Outlet key={location.pathname} />
         </div>
       </main>
     </div>
