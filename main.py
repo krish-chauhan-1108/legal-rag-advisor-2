@@ -26,8 +26,10 @@ Usage
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -226,18 +228,68 @@ def _verify_google_credential(credential: str) -> dict:
     return claims
 
 
-def get_current_user_email(authorization: str | None = Header(default=None)) -> str:
-    """Return the verified Google email for authenticated user-facing requests."""
+def _hash_session_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _issue_trana_session(db: Session, email: str) -> tuple[str, datetime]:
+    """Issue a revocable opaque session token without storing the raw token."""
+    now = datetime.utcnow()
+    expires_at = now + timedelta(days=max(1, settings.auth_session_days))
+    token = secrets.token_urlsafe(48)
+    db.add(db_models.AuthSession(
+        user_email=email,
+        token_hash=_hash_session_token(token),
+        created_at=now,
+        last_seen_at=now,
+        expires_at=expires_at,
+    ))
+    db.commit()
+    return token, expires_at
+
+
+def _get_trana_session(token: str, db: Session) -> str | None:
+    """Validate a TRANA session and roll its expiry while the user is active."""
+    session = db.query(db_models.AuthSession).filter(
+        db_models.AuthSession.token_hash == _hash_session_token(token),
+    ).first()
+    if session is None:
+        return None
+
+    now = datetime.utcnow()
+    if session.revoked_at is not None or session.expires_at <= now:
+        return None
+
+    should_record_activity = session.last_seen_at is None or now - session.last_seen_at >= timedelta(minutes=5)
+    if should_record_activity:
+        session.last_seen_at = now
+    # Keep active users signed in; inactive sessions still expire after the window.
+    should_extend = session.expires_at - now <= timedelta(days=7)
+    if should_extend:
+        session.expires_at = now + timedelta(days=max(1, settings.auth_session_days))
+    if should_record_activity or should_extend:
+        db.commit()
+    return session.user_email
+
+
+def get_current_user_email(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> str:
+    """Return the verified user email from a TRANA session or legacy Google token."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Sign in with Google to use chat history.")
-    claims = _verify_google_credential(authorization.split(" ", 1)[1].strip())
+    credential = authorization.split(" ", 1)[1].strip()
+    session_email = _get_trana_session(credential, db)
+    if session_email:
+        return session_email
+
+    # Compatibility window: old browser sessions still contain a Google ID token.
+    claims = _verify_google_credential(credential)
     return str(claims["email"])
 
 
-@app.post("/api/auth/google", response_model=GoogleAuthResponse, tags=["Authentication"])
-def authenticate_google(auth_in: GoogleAuthRequest, db: Session = Depends(get_db)):
-    """Verify a Google credential and upsert the corresponding application user."""
-    claims = _verify_google_credential(auth_in.credential)
+def _upsert_google_user(claims: dict, db: Session) -> db_models.User:
     google_id = str(claims["sub"])
     email = str(claims["email"])
     user = db.query(db_models.User).filter(db_models.User.google_id == google_id).first()
@@ -253,7 +305,53 @@ def authenticate_google(auth_in: GoogleAuthRequest, db: Session = Depends(get_db
     user.picture = claims.get("picture")
     db.commit()
     db.refresh(user)
-    return {"user": user}
+    return user
+
+
+def _auth_response(user: db_models.User, session_token: str, session_expires_at: datetime) -> dict:
+    return {
+        "user": {
+            "id": user.id,
+            "google_id": user.google_id,
+            "email": user.email,
+            "name": user.name,
+            "picture": user.picture,
+        },
+        "session_token": session_token,
+        "session_expires_at": session_expires_at.isoformat(),
+    }
+
+
+@app.post("/api/auth/google", response_model=GoogleAuthResponse, tags=["Authentication"])
+def authenticate_google(auth_in: GoogleAuthRequest, db: Session = Depends(get_db)):
+    """Exchange a Google ID token for a longer-lived TRANA session."""
+    claims = _verify_google_credential(auth_in.credential)
+    user = _upsert_google_user(claims, db)
+    session_token, session_expires_at = _issue_trana_session(db, user.email)
+    return _auth_response(user, session_token, session_expires_at)
+
+
+@app.post("/api/auth/session", response_model=GoogleAuthResponse, tags=["Authentication"])
+def migrate_google_session(auth_in: GoogleAuthRequest, db: Session = Depends(get_db)):
+    """Migrate a still-valid legacy browser Google token to a TRANA session."""
+    claims = _verify_google_credential(auth_in.credential)
+    user = _upsert_google_user(claims, db)
+    session_token, session_expires_at = _issue_trana_session(db, user.email)
+    return _auth_response(user, session_token, session_expires_at)
+
+
+@app.post("/api/auth/logout", tags=["Authentication"])
+def logout(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
+    """Revoke the current TRANA session when the user signs out."""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        session = db.query(db_models.AuthSession).filter(
+            db_models.AuthSession.token_hash == _hash_session_token(token),
+        ).first()
+        if session is not None and session.revoked_at is None:
+            session.revoked_at = datetime.utcnow()
+            db.commit()
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

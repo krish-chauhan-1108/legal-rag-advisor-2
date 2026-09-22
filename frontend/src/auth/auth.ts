@@ -15,6 +15,7 @@ export const notifyApiOnline = (sourceRegistryReady = false): void => {
 export interface AuthContextValue {
   credential: string | null;
   user: AuthUser | null;
+  sessionExpiresAt: string | null;
   signIn: (credential: string) => Promise<void>;
   signOut: () => void;
 }

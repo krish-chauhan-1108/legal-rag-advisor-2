@@ -124,6 +124,8 @@ class AuthenticatedUserResponse(BaseModel):
 
 class GoogleAuthResponse(BaseModel):
     user: AuthenticatedUserResponse
+    session_token: str
+    session_expires_at: str
 
 
 class AdminAccessResponse(BaseModel):

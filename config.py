@@ -67,6 +67,8 @@ class Settings(BaseSettings):
 
     # ── Auth ────────────────────────────────────────────────────────────────
     google_client_id: str | None = None
+    # Rolling TRANA session lifetime after Google sign-in.
+    auth_session_days: int = 30
 
     # ── Server ──────────────────────────────────────────────────────────────
     host: str = "0.0.0.0"

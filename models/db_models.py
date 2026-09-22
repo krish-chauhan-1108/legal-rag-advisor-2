@@ -13,6 +13,20 @@ class User(Base):
     picture = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+class AuthSession(Base):
+    """Hashed, revocable TRANA sessions issued after Google sign-in."""
+
+    __tablename__ = "auth_sessions"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_email = Column(String, index=True, nullable=False)
+    token_hash = Column(String(64), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked_at = Column(DateTime, nullable=True)
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
