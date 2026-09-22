@@ -64,3 +64,25 @@ The checked-in corpus currently contains reviewed Section 1(1) samples for
 BNS, BNSS, and BSA. Citations outside that corpus remain visibly unverified;
 they must not be presented as word-for-word statutory text until authoritative
 records are added and reviewed.
+
+## 6. Keep the free Render service warm
+
+Use an independent uptime monitor such as UptimeRobot to send an HTTPS `GET`
+request to:
+
+```text
+https://legal-rag-advisor-api.onrender.com/health
+```
+
+Configure the monitor to run every 5 minutes and expect an HTTP 2xx response.
+This reduces cold-start delays for the demo, but it does not guarantee
+availability during Render restarts, maintenance, or free-plan limits.
+It uses roughly 720 hours of the free service's 750-hour monthly allowance,
+leaving little room for other free services.
+
+Do not deploy a second free Render service that pings the main service while
+the main service pings it back. Both services can sleep independently, and
+mutual outbound requests do not reliably keep either service running. The
+existing `scripts/keep-render-alive.ps1` file remains available as a local
+fallback for manual testing when a machine is online; it is not the primary
+keep-alive mechanism.
