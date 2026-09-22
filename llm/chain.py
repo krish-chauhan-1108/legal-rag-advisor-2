@@ -104,20 +104,57 @@ def _normalize_analysis_payload(payload: object) -> dict:
         raise ValueError("provider response JSON was not an object")
     normalized = dict(payload)
 
+    def as_text(value, default=""):
+        if value is None:
+            return default
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
+
+    def as_bool(value, default=False):
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "yes", "1"}:
+                return True
+            if lowered in {"false", "no", "0", ""}:
+                return False
+        return bool(value)
+
+    def as_text_list(value):
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            value = [value]
+        return [as_text(item) for item in value if item is not None]
+
     for field_name in (
         "general_analysis",
         "situation_meaning",
         "bail_status",
         "handling_authority",
     ):
-        if normalized.get(field_name) is None:
-            normalized[field_name] = ""
+        normalized[field_name] = as_text(normalized.get(field_name))
     for field_name in ("is_conversational", "requires_sources", "suggest_lawyer"):
-        if normalized.get(field_name) is None:
-            normalized[field_name] = False
-    for field_name in ("next_24_hours", "rights", "applicable_laws", "relevant_source_indices"):
-        if normalized.get(field_name) is None:
-            normalized[field_name] = []
+        normalized[field_name] = as_bool(normalized.get(field_name), False)
+    normalized["conversational_reply"] = (
+        None if normalized.get("conversational_reply") is None
+        else as_text(normalized.get("conversational_reply"))
+    )
+    normalized["next_24_hours"] = as_text_list(normalized.get("next_24_hours"))
+    normalized["rights"] = as_text_list(normalized.get("rights"))
+    source_indices = normalized.get("relevant_source_indices") or []
+    if not isinstance(source_indices, list):
+        source_indices = [source_indices]
+    normalized["relevant_source_indices"] = [
+        int(value) for value in source_indices
+        if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().lstrip("-").isdigit())
+    ]
 
     laws = normalized.get("applicable_laws", [])
     if isinstance(laws, dict):
@@ -135,14 +172,11 @@ def _normalize_analysis_payload(payload: object) -> dict:
             "explanation",
             "quote_status",
         ):
-            value = normalized_law.get(field_name)
-            if value is None:
-                normalized_law[field_name] = ""
-            elif not isinstance(value, str):
-                normalized_law[field_name] = str(value)
-        for field_name in ("verified",):
-            if normalized_law.get(field_name) is None:
-                normalized_law[field_name] = False
+            normalized_law[field_name] = as_text(normalized_law.get(field_name))
+        for field_name in ("subsection", "exact_text", "source_url", "source_version", "source_hash"):
+            if normalized_law.get(field_name) is not None:
+                normalized_law[field_name] = as_text(normalized_law[field_name])
+        normalized_law["verified"] = as_bool(normalized_law.get("verified"), False)
         normalized_laws.append(normalized_law)
     normalized["applicable_laws"] = normalized_laws
     return normalized
@@ -197,6 +231,12 @@ async def _invoke_openai_compatible(record, messages, timeout: float | None) -> 
         content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
         return _parse_structured_analysis_content(content)
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        if hasattr(exc, "errors"):
+            details = "; ".join(
+                f"{'.'.join(str(part) for part in error.get('loc', ())) or 'root'}:{error.get('type', 'validation')}"
+                for error in exc.errors()
+            )
+            logger.warning("%s structured response validation fields: %s", record.provider, details[:500])
         raise RuntimeError(f"{record.provider} returned invalid structured analysis JSON.") from exc
 
 
