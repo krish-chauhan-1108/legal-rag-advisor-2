@@ -15,7 +15,7 @@ from typing import Optional
 
 import httpx
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from config import settings
 from key_manager import (
@@ -205,7 +205,19 @@ async def _invoke_openai_compatible(record, messages, timeout: float | None) -> 
         raise RuntimeError(f"No compatible base URL configured for provider {record.provider}.")
     payload = {
         "model": record.model,
-        "messages": [{"role": "system" if isinstance(message, SystemMessage) else "user", "content": _message_text(message)} for message in messages],
+        "messages": [
+            {
+                "role": (
+                    "system"
+                    if isinstance(message, SystemMessage)
+                    else "assistant"
+                    if isinstance(message, AIMessage)
+                    else "user"
+                ),
+                "content": _message_text(message),
+            }
+            for message in messages
+        ],
         "temperature": settings.llm_temperature,
         "max_tokens": 1024,
     }
@@ -420,6 +432,7 @@ async def run_analysis_pipeline(
     model_preference: Optional[str] = "quick",
     user_id: Optional[str] = None,
     ephemeral_context: Optional[str] = None,
+    conversation_history: Optional[list[dict[str, str]]] = None,
     source_registry: LawSourceRegistry | None = None,
 ) -> AnalysisResponse:
     """Run direct model analysis and deterministic legal-source verification.
@@ -427,6 +440,7 @@ async def run_analysis_pipeline(
     ``document_filter``, ``top_k``, and ``user_id`` remain accepted for API
     compatibility with older callers, but normal chat does not use local RAG.
     ``ephemeral_context`` is still passed to the model as user-provided context.
+    ``conversation_history`` contains bounded, already-compacted prior turns.
     """
 
     del document_filter, top_k, user_id, model_preference
@@ -438,22 +452,7 @@ async def run_analysis_pipeline(
         )
 
     start_time = time.time()
-    prompt = DIRECT_ANALYSIS_PROMPT.format(
-        question=query,
-        ephemeral_context=ephemeral_context or "(No uploaded document was provided.)",
-    )
-    messages = [SystemMessage(content=SYSTEM_PROMPT)]
-
-    if model_preference == "deep":
-        messages.append(
-            SystemMessage(
-                content=(
-                    "The user selected Deep Thinking. Be comprehensive where it helps, "
-                    "but do not invent legal text or citations."
-                )
-            )
-        )
-    messages.append(HumanMessage(content=prompt))
+    messages = _build_prompt_messages(query, ephemeral_context, conversation_history)
 
     if model_preference == "quick":
         structured_analysis, actual_model_used = await _run_quick_provider_pipeline(
@@ -562,3 +561,28 @@ async def run_analysis_pipeline(
         model_used=actual_model_used,
         processing_time_seconds=elapsed,
     )
+
+
+def _build_prompt_messages(
+    query: str,
+    ephemeral_context: Optional[str],
+    conversation_history: Optional[list[dict[str, str]]],
+) -> list:
+    """Build messages with prior turns before the newest user prompt."""
+
+    prompt = DIRECT_ANALYSIS_PROMPT.format(
+        question=query,
+        ephemeral_context=ephemeral_context or "(No uploaded document was provided.)",
+    )
+    messages = [SystemMessage(content=SYSTEM_PROMPT)]
+    for item in conversation_history or []:
+        role = item.get("role")
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        if role == "assistant":
+            messages.append(AIMessage(content=content))
+        elif role == "user":
+            messages.append(HumanMessage(content=content))
+    messages.append(HumanMessage(content=prompt))
+    return messages

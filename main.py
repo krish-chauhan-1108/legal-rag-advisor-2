@@ -97,6 +97,154 @@ logger = get_logger(__name__)
 
 _health_source_registry_ready = False
 
+# Conversation history is intentionally bounded so a long-running chat cannot
+# consume the provider context window or make every request progressively slower.
+HISTORY_MAX_MESSAGES = 32
+HISTORY_MESSAGE_CHAR_LIMIT = 3000
+HISTORY_CONTEXT_CHAR_LIMIT = 24_000
+
+
+def _clip_history_text(value: object, limit: int = HISTORY_MESSAGE_CHAR_LIMIT) -> str:
+    text_value = str(value or "").strip()
+    if len(text_value) <= limit:
+        return text_value
+    return text_value[: max(1, limit - 1)].rstrip() + "…"
+
+
+def _compact_assistant_history(message: db_models.ChatMessage) -> str:
+    """Serialize useful assistant context without copying statutory quotations."""
+
+    compact: dict[str, object] = {}
+    try:
+        structured = json.loads(message.structured_content or "{}")
+    except (TypeError, json.JSONDecodeError):
+        structured = {}
+
+    if isinstance(structured, dict):
+        for field_name in (
+            "conversational_reply",
+            "general_analysis",
+            "situation_meaning",
+            "bail_status",
+            "handling_authority",
+        ):
+            value = structured.get(field_name)
+            if value:
+                compact[field_name] = _clip_history_text(value)
+
+        for field_name in ("next_24_hours", "rights"):
+            values = structured.get(field_name)
+            if isinstance(values, list) and values:
+                compact[field_name] = [
+                    _clip_history_text(value, 600)
+                    for value in values[:5]
+                    if value
+                ]
+
+        laws = structured.get("applicable_laws")
+        if isinstance(laws, list) and laws:
+            compact["applicable_laws"] = [
+                {
+                    field_name: _clip_history_text(law.get(field_name), 300)
+                    for field_name in (
+                        "act",
+                        "code",
+                        "section",
+                        "subsection",
+                        "explanation",
+                        "verified",
+                    )
+                    if isinstance(law, dict) and law.get(field_name) not in (None, "")
+                }
+                for law in laws[:3]
+                if isinstance(law, dict)
+            ]
+
+    try:
+        sources = json.loads(message.sources or "[]")
+    except (TypeError, json.JSONDecodeError):
+        sources = []
+    if isinstance(sources, list) and sources:
+        compact["sources"] = [
+            {
+                field_name: _clip_history_text(source.get(field_name), 300)
+                for field_name in (
+                    "document_name",
+                    "act",
+                    "code",
+                    "section",
+                    "subsection",
+                    "source_version",
+                    "quote_status",
+                    "verified",
+                )
+                if isinstance(source, dict) and source.get(field_name) not in (None, "")
+            }
+            for source in sources[:3]
+            if isinstance(source, dict)
+        ]
+
+    if not compact and message.content:
+        compact["reply"] = _clip_history_text(message.content)
+
+    return json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+
+
+def _build_conversation_history(messages) -> list[dict[str, str]]:
+    """Return recent chronological history in a compact, provider-neutral shape."""
+
+    ordered = sorted(
+        messages or [],
+        key=lambda message: (
+            getattr(message, "created_at", None) or datetime.min,
+            getattr(message, "id", ""),
+        ),
+    )[-HISTORY_MAX_MESSAGES:]
+    candidates: list[dict[str, str]] = []
+    for message in ordered:
+        saved_role = getattr(message, "role", "")
+        if saved_role not in {"user", "assistant"}:
+            continue
+        role = "assistant" if saved_role == "assistant" else "user"
+        raw_content = (
+            _compact_assistant_history(message)
+            if role == "assistant"
+            else _clip_history_text(getattr(message, "content", ""))
+        )
+        content = _clip_history_text(raw_content)
+        if content:
+            candidates.append({"role": role, "content": content})
+
+    # Keep the newest complete messages that fit, then restore chronological order.
+    selected: list[dict[str, str]] = []
+    total_chars = 0
+    for item in reversed(candidates):
+        next_total = total_chars + len(item["content"])
+        if selected and next_total > HISTORY_CONTEXT_CHAR_LIMIT:
+            break
+        selected.append(item)
+        total_chars = next_total
+    return list(reversed(selected))
+
+
+def _load_conversation_history(db: Session, chat_id: str, user_email: str) -> list[dict[str, str]]:
+    """Load history only after confirming the chat belongs to the authenticated user."""
+
+    chat_session = db.query(db_models.ChatSession).filter(
+        db_models.ChatSession.id == chat_id,
+        db_models.ChatSession.user_email == user_email,
+    ).first()
+    if not chat_session:
+        return []
+
+    messages = db.query(db_models.ChatMessage).filter(
+        db_models.ChatMessage.session_id == chat_session.id,
+    ).order_by(
+        db_models.ChatMessage.created_at.asc(),
+        db_models.ChatMessage.id.asc(),
+    ).all()
+    return _build_conversation_history(messages)
+
 
 def _ensure_chat_message_metadata_columns() -> None:
     """Add message stats columns to databases created before metadata existed."""
@@ -110,7 +258,6 @@ def _ensure_chat_message_metadata_columns() -> None:
         for column_name, column_type in missing_columns.items():
             if column_name not in existing_columns:
                 connection.execute(text(f"ALTER TABLE chat_messages ADD COLUMN {column_name} {column_type}"))
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Application Lifecycle
@@ -899,7 +1046,7 @@ def ingest_document(
             
         doc_name = file.filename
         upload_path = Path(settings.upload_dir) / doc_name
-        
+
         try:
             with open(upload_path, "wb") as f:
                 shutil.copyfileobj(file.file, f)
@@ -1066,6 +1213,8 @@ async def analyze(
     """
     # ── Preflight check ─────────────────────────────────────────────────
     from llm.chain import run_analysis_pipeline
+    chat_session = None
+    conversation_history = []
     # Save user message to DB if chat_id is provided
     if request.chat_id:
         # Check if chat exists and belongs to the user
@@ -1074,6 +1223,13 @@ async def analyze(
             db_models.ChatSession.user_email == user_email
         ).first()
         if chat_session:
+            prior_messages = db.query(db_models.ChatMessage).filter(
+                db_models.ChatMessage.session_id == chat_session.id,
+            ).order_by(
+                db_models.ChatMessage.created_at.desc(),
+                db_models.ChatMessage.id.desc(),
+            ).limit(HISTORY_MAX_MESSAGES).all()
+            conversation_history = _build_conversation_history(prior_messages)
             user_msg = db_models.ChatMessage(
                 session_id=request.chat_id,
                 role="user",
@@ -1096,6 +1252,7 @@ async def analyze(
             top_k=request.top_k,
             model_preference="quick",
             ephemeral_context=request.ephemeral_context,
+            conversation_history=conversation_history,
         )
     except QuickModelUnavailableError as exc:
         logger.warning("Quick Thinking unavailable: %s", exc)
@@ -1129,27 +1286,22 @@ async def analyze(
         )
 
     # Save assistant message to DB
-    if request.chat_id:
-        chat_session = db.query(db_models.ChatSession).filter(
-            db_models.ChatSession.id == request.chat_id,
-            db_models.ChatSession.user_email == user_email
-        ).first()
-        if chat_session:
-            structured_json = response.analysis.model_dump_json()
-            sources_json = json.dumps([s.model_dump() for s in response.sources])
-            
-            assistant_msg = db_models.ChatMessage(
-                session_id=request.chat_id,
-                role="assistant",
-                content="", # We use structured_content instead
-                structured_content=structured_json,
-                sources=sources_json,
-                model_used=response.model_used,
-                processing_time_seconds=response.processing_time_seconds,
-            )
-            db.add(assistant_msg)
-            chat_session.updated_at = db_models.datetime.utcnow()
-            db.commit()
+    if request.chat_id and chat_session:
+        structured_json = response.analysis.model_dump_json()
+        sources_json = json.dumps([s.model_dump() for s in response.sources])
+
+        assistant_msg = db_models.ChatMessage(
+            session_id=request.chat_id,
+            role="assistant",
+            content="", # We use structured_content instead
+            structured_content=structured_json,
+            sources=sources_json,
+            model_used=response.model_used,
+            processing_time_seconds=response.processing_time_seconds,
+        )
+        db.add(assistant_msg)
+        chat_session.updated_at = db_models.datetime.utcnow()
+        db.commit()
 
     return response
 
