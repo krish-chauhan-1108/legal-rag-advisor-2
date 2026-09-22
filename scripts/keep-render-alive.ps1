@@ -1,21 +1,18 @@
 param(
     [string]$ApiUrl = "https://legal-rag-advisor-api.onrender.com",
     [ValidateRange(60, 3600)]
-    [int]$IntervalSeconds = 300,
+    [int]$IntervalSeconds = 240,
     [ValidateRange(5, 120)]
     [int]$TimeoutSeconds = 30,
     [switch]$Once
 )
 
 $ErrorActionPreference = "Stop"
-$normalizedApiUrl = $ApiUrl.Trim()
-if ($normalizedApiUrl.StartsWith('"') -and $normalizedApiUrl.EndsWith('"')) {
-    $normalizedApiUrl = $normalizedApiUrl.Substring(1, $normalizedApiUrl.Length - 2).Trim()
-}
+$normalizedApiUrl = $ApiUrl.Trim().Trim('"').Trim("'").Trim()
 
 try {
     $baseUri = [Uri]$normalizedApiUrl
-    if (-not $baseUri.IsAbsoluteUri -or $baseUri.Scheme -notin @('http', 'https')) {
+    if (-not $baseUri.IsAbsoluteUri -or $baseUri.Scheme -notin @('http', 'https') -or [string]::IsNullOrWhiteSpace($baseUri.Host)) {
         throw "The API URL must be an absolute http(s) URL."
     }
 }
@@ -23,7 +20,17 @@ catch {
     throw "Invalid API URL '$ApiUrl'. Use a value such as https://legal-rag-advisor-api.onrender.com"
 }
 
-$healthUrl = "$($normalizedApiUrl.TrimEnd('/'))/health"
+$healthUriBuilder = [UriBuilder]$baseUri
+$healthPath = $healthUriBuilder.Path.TrimEnd('/')
+if ([string]::IsNullOrWhiteSpace($healthPath)) {
+    $healthPath = "/health"
+}
+elseif (-not $healthPath.EndsWith("/health", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $healthPath = "$healthPath/health"
+}
+$healthUriBuilder.Path = $healthPath
+$healthUriBuilder.Query = ""
+$healthUrl = $healthUriBuilder.Uri.AbsoluteUri.TrimEnd('/')
 
 function Get-IndiaTime {
     $indiaTimeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById("India Standard Time")
