@@ -4,20 +4,20 @@ from models.schemas import ApplicableLaw, StructuredAnalysis
 
 
 OFFICIAL_ACT_URLS = {
-    "BNS": "https://www.indiacode.nic.in/indiacode/handle/123456789/20062?col=123456789%2F1362&view_type=search",
-    "BNSS": "https://www.indiacode.nic.in/indiacode/handle/123456789/20099?view_type=browse",
-    "BSA": "https://www.indiacode.nic.in/indiacode/handle/123456789/20063?col=123456789%2F1362&view_type=search",
+    "BNS": "https://www.mha.gov.in/sites/default/files/2024-04/250883_english_01042024.pdf",
+    "BNSS": "https://www.mha.gov.in/sites/default/files/2024-04/250884_2_english_01042024.pdf",
+    "BSA": "https://www.mha.gov.in/sites/default/files/2024-04/250882_english_01042024_0.pdf",
 }
 
 
-def test_supported_acts_use_official_india_code_pages() -> None:
+def test_supported_acts_use_official_mha_pdfs() -> None:
     registry = get_registry()
 
     for code, expected_url in OFFICIAL_ACT_URLS.items():
         records = [record for record in registry.records() if record.code == code]
         assert records
         assert {record.source_url for record in records} == {expected_url}
-        assert all(record.source_url.startswith("https://www.indiacode.nic.in/") for record in records)
+        assert all(record.source_url.startswith("https://www.mha.gov.in/") for record in records)
 
 
 def test_full_supported_act_coverage_is_loaded() -> None:

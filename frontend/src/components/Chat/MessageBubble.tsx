@@ -23,10 +23,10 @@ const formatMessageTime = (value: string): string | null => {
 
 const VERIFIED_QUOTE_STATUSES = new Set(['backend_verified', 'verified', 'source_verified']);
 
-const INDIA_CODE_ACT_URLS = {
-  bns: 'https://www.indiacode.nic.in/indiacode/handle/123456789/20062?col=123456789%2F1362&view_type=search',
-  bnss: 'https://www.indiacode.nic.in/indiacode/handle/123456789/20099?view_type=browse',
-  bsa: 'https://www.indiacode.nic.in/indiacode/handle/123456789/20063?col=123456789%2F1362&view_type=search',
+const OFFICIAL_ACT_URLS = {
+  bns: 'https://www.mha.gov.in/sites/default/files/2024-04/250883_english_01042024.pdf',
+  bnss: 'https://www.mha.gov.in/sites/default/files/2024-04/250884_2_english_01042024.pdf',
+  bsa: 'https://www.mha.gov.in/sites/default/files/2024-04/250882_english_01042024_0.pdf',
 } as const;
 
 const isVerifiedSource = (source: SourceChunk): boolean => {
@@ -77,22 +77,22 @@ const getConciseExplanation = (source: SourceChunk): string | null => {
   return explanation.length > 260 ? `${explanation.slice(0, 257)}...` : explanation;
 };
 
-const getIndiaCodeUrl = (source: SourceChunk): string | null => {
+const getOfficialActUrl = (source: SourceChunk): string | null => {
   const identity = [source.act, source.code, source.document_name].filter(Boolean).join(' ').toLowerCase();
-  // Always use the canonical act landing page for BNS/BNSS/BSA. This also
-  // repairs older persisted messages whose source_url points at a stale PDF
-  // or an India Code route that now returns an Akamai error.
-  if (identity.includes('bharatiya nyaya') || /\bbns\b/.test(identity)) return INDIA_CODE_ACT_URLS.bns;
-  if (identity.includes('bharatiya nagarik') || /\bbnss\b/.test(identity)) return INDIA_CODE_ACT_URLS.bnss;
-  if (identity.includes('bharatiya sakshya') || /\bbsa\b/.test(identity)) return INDIA_CODE_ACT_URLS.bsa;
+  // Always use the reachable official MHA copy for BNS/BNSS/BSA. This also
+  // repairs older persisted messages whose source_url points at India Code,
+  // which is currently returning an Akamai error for this deployment.
+  if (identity.includes('bharatiya nyaya') || /\bbns\b/.test(identity)) return OFFICIAL_ACT_URLS.bns;
+  if (identity.includes('bharatiya nagarik') || /\bbnss\b/.test(identity)) return OFFICIAL_ACT_URLS.bnss;
+  if (identity.includes('bharatiya sakshya') || /\bbsa\b/.test(identity)) return OFFICIAL_ACT_URLS.bsa;
 
   const suppliedUrl = source.source_url?.trim();
   if (suppliedUrl) {
     try {
       const parsed = new URL(suppliedUrl);
       const hostname = parsed.hostname.toLowerCase();
-      const isIndiaCode = hostname === 'indiacode.nic.in' || hostname.endsWith('.indiacode.nic.in');
-      if (parsed.protocol === 'https:' && isIndiaCode) return parsed.toString();
+      const isOfficialHost = hostname === 'mha.gov.in' || hostname.endsWith('.mha.gov.in');
+      if (parsed.protocol === 'https:' && isOfficialHost) return parsed.toString();
     } catch {
       // No safe official URL was supplied.
     }
@@ -197,15 +197,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                       ) : null}
 
                       <div className="message-source-card__footer">
-                        {getIndiaCodeUrl(source) ? (
+                        {getOfficialActUrl(source) ? (
                           <a
-                            href={getIndiaCodeUrl(source) ?? undefined}
+                            href={getOfficialActUrl(source) ?? undefined}
                             target="_blank"
                             rel="noreferrer"
                             className="message-source-card__link"
                           >
                             <ExternalLink size={13} aria-hidden="true" />
-                            Open India Code
+                            Open official text
                           </a>
                         ) : (
                           <span className="message-source-card__no-link">Official link unavailable</span>

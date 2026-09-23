@@ -25,21 +25,21 @@ SOURCES = (
         "act": "Bharatiya Nyaya Sanhita, 2023",
         "filename": "250883_english_01042024.pdf",
         "max_section": 358,
-        "source_url": "https://www.indiacode.nic.in/bitstream/123456789/20062/1/a202345.pdf",
+        "source_url": "https://www.mha.gov.in/sites/default/files/2024-04/250883_english_01042024.pdf",
     },
     {
         "code": "BNSS",
         "act": "Bharatiya Nagarik Suraksha Sanhita, 2023",
         "filename": "250884_2_english_01042024.pdf",
         "max_section": 531,
-        "source_url": "https://www.indiacode.nic.in/bitstream/123456789/21544/1/the_bharatiya_nagarik_suraksha_sanhita%2C_2023.pdf",
+        "source_url": "https://www.mha.gov.in/sites/default/files/2024-04/250884_2_english_01042024.pdf",
     },
     {
         "code": "BSA",
         "act": "Bharatiya Sakshya Adhiniyam, 2023",
         "filename": "250882_english_01042024_0.pdf",
         "max_section": 170,
-        "source_url": "https://www.indiacode.nic.in/bitstream/123456789/20063/1/a2023-47.pdf",
+        "source_url": "https://www.mha.gov.in/sites/default/files/2024-04/250882_english_01042024_0.pdf",
     },
 )
 
@@ -51,7 +51,7 @@ REVIEWED_SUBSECTIONS = (
         "subsection": "1",
         "heading": "Short title, commencement and application",
         "exact_text": "This Act may be called the Bharatiya Nyaya Sanhita, 2023.",
-        "source_url": "https://www.indiacode.nic.in/bitstream/123456789/20062/1/a202345.pdf",
+        "source_url": "https://www.mha.gov.in/sites/default/files/2024-04/250883_english_01042024.pdf",
     },
     {
         "act": "Bharatiya Nagarik Suraksha Sanhita, 2023",
@@ -60,7 +60,7 @@ REVIEWED_SUBSECTIONS = (
         "subsection": "1",
         "heading": "Short title, extent and commencement",
         "exact_text": "This Act may be called the Bharatiya Nagarik Suraksha Sanhita, 2023.",
-        "source_url": "https://www.indiacode.nic.in/bitstream/123456789/21544/1/the_bharatiya_nagarik_suraksha_sanhita%2C_2023.pdf",
+        "source_url": "https://www.mha.gov.in/sites/default/files/2024-04/250884_2_english_01042024.pdf",
     },
     {
         "act": "Bharatiya Sakshya Adhiniyam, 2023",
@@ -69,7 +69,7 @@ REVIEWED_SUBSECTIONS = (
         "subsection": "1",
         "heading": "Short title, application and commencement",
         "exact_text": "This Act may be called the Bharatiya Sakshya Adhiniyam, 2023.",
-        "source_url": "https://www.indiacode.nic.in/bitstream/123456789/20063/1/a2023-47.pdf",
+        "source_url": "https://www.mha.gov.in/sites/default/files/2024-04/250882_english_01042024_0.pdf",
     },
 )
 
