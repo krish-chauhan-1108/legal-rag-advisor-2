@@ -97,6 +97,8 @@ logger = get_logger(__name__)
 
 _health_source_registry_ready = False
 
+NEW_CHAT_GREETING = "I'm TRANA\u2014your friendly legal assistant. How can I help you today?"
+
 # Conversation history is intentionally bounded so a long-running chat cannot
 # consume the provider context window or make every request progressively slower.
 HISTORY_MAX_MESSAGES = 32
@@ -850,7 +852,7 @@ def create_chat(chat_in: ChatSessionCreate, user_email: str = Depends(get_curren
     init_msg = db_models.ChatMessage(
         session_id=new_id,
         role="assistant",
-        content="I'm TRANA—your friendly legal assistant. How can I help you today?"
+        content=NEW_CHAT_GREETING,
     )
     db.add(init_msg)
     

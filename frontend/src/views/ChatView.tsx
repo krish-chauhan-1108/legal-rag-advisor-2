@@ -8,30 +8,9 @@ import { authFetch, authHeaders, notifyApiOnline, useAuth } from '../auth/auth';
 import { API_URL } from '../config';
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
 
-const VERIFIED_QUOTE_STATUSES = new Set(['backend_verified', 'verified', 'source_verified']);
-
-const isVerifiedLaw = (law: ApplicableLaw): boolean => {
-  const status = law.quote_status?.trim().toLowerCase();
-  return law.verified === true && !!status && VERIFIED_QUOTE_STATUSES.has(status);
-};
-
 const formatSection = (section?: string | null, subsection?: string | null): string => {
   if (!section) return subsection ? `(${subsection})` : '';
   return subsection ? `${section}(${subsection})` : section;
-};
-
-const formatSourceReference = (law: ApplicableLaw): string | null => {
-  if (!isVerifiedLaw(law)) return null;
-
-  const act = law.act ?? law.code;
-  const section = formatSection(law.section, law.subsection);
-  const reference = [act, section].filter(Boolean).join(' — ');
-  if (!reference) return null;
-
-  if (law.source_url && /^https?:\/\//i.test(law.source_url)) {
-    return `[${reference}](${law.source_url})`;
-  }
-  return reference;
 };
 
 const formatLegalLaw = (law: ApplicableLaw): string => {
@@ -45,15 +24,13 @@ const formatLegalLaw = (law: ApplicableLaw): string => {
     parts.push(`**Explanation**\n\n${explanation.length > 280 ? `${explanation.slice(0, 277)}…` : explanation}`);
   }
 
-  const sourceReference = formatSourceReference(law);
-  if (sourceReference) {
-    parts.push(`**Verified source:** ${sourceReference}`);
-  }
-
   return parts.join('\n\n');
 };
 
-const formatAnalysis = (analysis: unknown): string => {
+const formatAnalysis = (
+  analysis: unknown,
+  options: { includeLegacyLawSummary?: boolean } = {},
+): string => {
   if (typeof analysis === 'string') return analysis;
   if (!analysis || typeof analysis !== 'object') return 'The backend returned an empty analysis.';
 
@@ -71,7 +48,10 @@ const formatAnalysis = (analysis: unknown): string => {
     sections.push(`## Your Rights\n${result.rights.map(item => `- ${item}`).join('\n')}`);
   }
   if (result.handling_authority) sections.push(`## Relevant Authority\n${result.handling_authority}`);
-  if (result.applicable_laws?.length) {
+  // Current responses render authoritative sources in MessageBubble. Keep a
+  // plain law summary only for older persisted messages that have no separate
+  // `sources` array, so legacy chats remain readable without duplicate links.
+  if (options.includeLegacyLawSummary && result.applicable_laws?.length) {
     const laws = result.applicable_laws.map(formatLegalLaw);
     sections.push(`## Applicable Laws\n${laws.join('\n\n')}`);
   }
@@ -187,16 +167,19 @@ export const ChatView: React.FC = () => {
         const chat = await response.json() as ChatSession;
         if (!active) return;
 
-        setMessages((chat.messages ?? []).map((message) => ({
-          role: message.role,
-          content: message.role === 'assistant' && message.structured_content
-            ? formatAnalysis(message.structured_content)
-            : message.content,
-          sources: message.sources ?? undefined,
-          model_used: message.model_used ?? undefined,
-          processing_time_seconds: message.processing_time_seconds ?? undefined,
-          created_at: message.created_at,
-        })));
+        setMessages((chat.messages ?? []).map((message) => {
+          const sources = message.sources ?? undefined;
+          return {
+            role: message.role,
+            content: message.role === 'assistant' && message.structured_content
+              ? formatAnalysis(message.structured_content, { includeLegacyLawSummary: !sources?.length })
+              : message.content,
+            sources,
+            model_used: message.model_used ?? undefined,
+            processing_time_seconds: message.processing_time_seconds ?? undefined,
+            created_at: message.created_at,
+          };
+        }));
       } catch (error) {
         console.error('Failed to load chat history', error);
       } finally {
@@ -278,10 +261,11 @@ export const ChatView: React.FC = () => {
       if (res.ok) {
         notifyApiOnline(true);
         const data = await res.json();
+        const sources = Array.isArray(data.sources) ? data.sources : undefined;
         const assistantMessage: ChatMessage = {
           role: 'assistant',
-          content: formatAnalysis(data.analysis),
-          sources: data.sources,
+          content: formatAnalysis(data.analysis, { includeLegacyLawSummary: !sources?.length }),
+          sources,
           model_used: data.model_used,
           processing_time_seconds: data.processing_time_seconds,
           created_at: new Date().toISOString(),
