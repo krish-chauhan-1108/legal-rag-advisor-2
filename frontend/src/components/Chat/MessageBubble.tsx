@@ -78,22 +78,26 @@ const getConciseExplanation = (source: SourceChunk): string | null => {
 };
 
 const getIndiaCodeUrl = (source: SourceChunk): string | null => {
+  const identity = [source.act, source.code, source.document_name].filter(Boolean).join(' ').toLowerCase();
+  // Always use the canonical act landing page for BNS/BNSS/BSA. This also
+  // repairs older persisted messages whose source_url points at a stale PDF
+  // or an India Code route that now returns an Akamai error.
+  if (identity.includes('bharatiya nyaya') || /\bbns\b/.test(identity)) return INDIA_CODE_ACT_URLS.bns;
+  if (identity.includes('bharatiya nagarik') || /\bbnss\b/.test(identity)) return INDIA_CODE_ACT_URLS.bnss;
+  if (identity.includes('bharatiya sakshya') || /\bbsa\b/.test(identity)) return INDIA_CODE_ACT_URLS.bsa;
+
   const suppliedUrl = source.source_url?.trim();
   if (suppliedUrl) {
     try {
       const parsed = new URL(suppliedUrl);
-      if (parsed.protocol === 'https:' && parsed.hostname.toLowerCase().endsWith('indiacode.nic.in')) {
-        return parsed.toString();
-      }
+      const hostname = parsed.hostname.toLowerCase();
+      const isIndiaCode = hostname === 'indiacode.nic.in' || hostname.endsWith('.indiacode.nic.in');
+      if (parsed.protocol === 'https:' && isIndiaCode) return parsed.toString();
     } catch {
-      // Fall back to the known official act page below.
+      // No safe official URL was supplied.
     }
   }
 
-  const identity = [source.act, source.code, source.document_name].filter(Boolean).join(' ').toLowerCase();
-  if (identity.includes('bharatiya nyaya') || /\bbns\b/.test(identity)) return INDIA_CODE_ACT_URLS.bns;
-  if (identity.includes('bharatiya nagarik') || /\bbnss\b/.test(identity)) return INDIA_CODE_ACT_URLS.bnss;
-  if (identity.includes('bharatiya sakshya') || /\bbsa\b/.test(identity)) return INDIA_CODE_ACT_URLS.bsa;
   return null;
 };
 

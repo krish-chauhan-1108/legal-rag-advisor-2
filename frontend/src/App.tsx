@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { DashboardLayout } from './views/DashboardLayout';
 import { ChatView } from './views/ChatView';
 import { AccountView } from './views/AccountView';
@@ -7,6 +7,8 @@ import { HomePage } from './views/HomePage';
 import { AdminView } from './views/AdminView';
 
 const AppContent = () => {
+  const location = useLocation();
+
   return (
     <Routes>
       <Route path="/privacy" element={<LegalPage />} />
@@ -14,8 +16,8 @@ const AppContent = () => {
       <Route path="/home" element={<HomePage />} />
       <Route path="/" element={<DashboardLayout />}>
         {/* Default dashboard view */}
-        <Route index element={<ChatView />} />
-        <Route path="chat/:id" element={<ChatView />} />
+        <Route index element={<ChatView key={location.pathname} />} />
+        <Route path="chat/:id" element={<ChatView key={location.pathname} />} />
         <Route path="account" element={<AccountView />} />
         <Route path="admin" element={<AdminView />} />
       </Route>

@@ -7,6 +7,13 @@ import type { ApplicableLaw, ChatMessage, ChatSession, StructuredAnalysis } from
 import { authFetch, authHeaders, notifyApiOnline, useAuth } from '../auth/auth';
 import { API_URL } from '../config';
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
+const WELCOME_MESSAGE = "I'm TRANA\u2014your friendly legal assistant. How can I help you today?";
+
+const createWelcomeMessage = (): ChatMessage => ({
+  role: 'assistant',
+  content: WELCOME_MESSAGE,
+  created_at: new Date().toISOString(),
+});
 
 const formatSection = (section?: string | null, subsection?: string | null): string => {
   if (!section) return subsection ? `(${subsection})` : '';
@@ -123,7 +130,9 @@ export const ChatView: React.FC = () => {
   const { id: routeChatId } = useParams<{ id: string }>();
   const { credential, user } = useAuth();
   const preloadedMessages = (location.state as { preloadedMessages?: ChatMessage[] } | null)?.preloadedMessages;
-  const [messages, setMessages] = useState<ChatMessage[]>(() => preloadedMessages ?? []);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => (
+    preloadedMessages ?? (routeChatId ? [] : [createWelcomeMessage()])
+  ));
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -272,9 +281,12 @@ export const ChatView: React.FC = () => {
         };
         setMessages(prev => [...prev, assistantMessage]);
         if (!routeChatId && activeChatId) {
+          const messagesForNavigation = messages.length > 0
+            ? messages
+            : [createWelcomeMessage()];
           navigate(`/chat/${activeChatId}`, {
             replace: true,
-            state: { preloadedMessages: [...messages, newMessage, assistantMessage] },
+            state: { preloadedMessages: [...messagesForNavigation, newMessage, assistantMessage] },
           });
         }
       } else {
