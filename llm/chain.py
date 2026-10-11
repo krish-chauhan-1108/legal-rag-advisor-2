@@ -36,7 +36,6 @@ from key_manager import (
 from legal_sources.registry import LawSourceRegistry, get_registry
 from llm.prompts import DIRECT_ANALYSIS_PROMPT, SYSTEM_PROMPT
 from models.schemas import AnalysisResponse, SourceChunk, StructuredAnalysis
-from pydantic import BaseModel, Field
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -64,19 +63,6 @@ explanation in general_analysis and return the exact requested code and section
 as the only applicable_laws item. Leave quote and exact_text empty; the backend
 will attach the verified source text.
 """
-_SECTION_VERIFIER_PROMPT = """\
-You are an independent statutory-source auditor. Decide whether every factual
-claim in the proposed explanation is supported by the supplied exact text for
-the exact requested Act and section. The statute text is the only authority.
-Reject claims that are absent, contradict the text, or describe another Act's
-same-numbered section. Return only JSON: {\"supported\": true} or
-{\"supported\": false}. Do not use outside knowledge.
-"""
-
-
-class _SectionVerification(BaseModel):
-    supported: bool = Field(...)
-
 _PROVIDER_BASE_URLS = {
     "groq": "https://api.groq.com/openai/v1",
     "cerebras": "https://api.cerebras.ai/v1",
@@ -320,87 +306,6 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
     raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited or unavailable.")
 
 
-async def _independent_section_verification(record, explanation: str, generation_model: str) -> bool:
-    """Verify an answer with a separately configured provider; fail closed."""
-    try:
-        generation_provider = generation_model.split(":", 2)[1]
-        verifier = next((route for route in _quick_routes()
-                         if route.provider != generation_provider), None)
-        if verifier is None:
-            logger.warning("No independent provider available for direct section verification")
-            return False
-        user_content = (
-            f"REQUESTED ACT: {record.act} ({record.code})\n"
-            f"REQUESTED SECTION: {record.section}\n"
-            f"EXACT STATUTORY TEXT:\n{record.exact_text}\n\n"
-            f"PROPOSED EXPLANATION:\n{explanation}"
-        )
-        messages = [SystemMessage(content=_SECTION_VERIFIER_PROMPT), HumanMessage(content=user_content)]
-        if verifier.provider == "google":
-            llm, _, _ = _get_llm("quick", force_reinit=True, key_record=verifier)
-            structured = llm.with_structured_output(_SectionVerification)
-            result = await asyncio.wait_for(structured.ainvoke(messages), timeout=8.0)
-            if isinstance(result, _SectionVerification):
-                return result.supported
-            if isinstance(result, dict) and type(result.get("supported")) is bool:
-                return result["supported"]
-            return False
-
-        base_url = _provider_url(verifier)
-        payload = {
-            "model": verifier.model,
-            "messages": [
-                {"role": "system", "content": _SECTION_VERIFIER_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            "temperature": 0,
-            "max_tokens": 40,
-            "response_format": {"type": "json_object"},
-        }
-        headers = {"Authorization": f"Bearer {verifier.secret}", "Content-Type": "application/json"}
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
-        if response.status_code >= 400:
-            return False
-        content = response.json().get("choices", [{}])[0].get("message", {}).get("content")
-        decoded = json.loads(content) if isinstance(content, str) else None
-        return isinstance(decoded, dict) and type(decoded.get("supported")) is bool and decoded["supported"]
-    except Exception as exc:
-        logger.warning("Direct section verification failed closed: %s", exc)
-        return False
-
-
-def _direct_section_claims(analysis: StructuredAnalysis) -> str:
-    """Collect all generated user-facing claims for the source auditor."""
-    fields = (
-        ("general_analysis", analysis.general_analysis),
-        ("situation_meaning", analysis.situation_meaning),
-        ("bail_status", analysis.bail_status),
-        ("handling_authority", analysis.handling_authority),
-    )
-    parts = [f"{label}: {value}" for label, value in fields if value]
-    for label in ("next_24_hours", "rights"):
-        values = getattr(analysis, label)
-        if values:
-            parts.append(f"{label}: " + "; ".join(values))
-    for law in analysis.applicable_laws:
-        if law.explanation:
-            parts.append(f"citation explanation: {law.explanation}")
-    return "\n".join(parts)
-
-
-def _use_verified_text_fallback(analysis: StructuredAnalysis, record) -> None:
-    analysis.general_analysis = (
-        "I couldn't verify an explanation against the requested provision. "
-        "Here is the verified statutory text:\n\n" + record.exact_text
-    )
-    analysis.situation_meaning = ""
-    analysis.bail_status = ""
-    analysis.next_24_hours = []
-    analysis.rights = []
-    analysis.handling_authority = ""
-
-
 def _clean_model_text(value: str, max_length: int = 1200) -> str:
     """Remove obvious provider repetition before content reaches the user."""
 
@@ -583,10 +488,6 @@ async def run_analysis_pipeline(
         )
         if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or ""):
             _enforce_direct_section_match(structured_analysis, requested_law, registry)
-            if requested_law.code in {"BNS", "BNSS"} and not await _independent_section_verification(
-                requested_law, _direct_section_claims(structured_analysis), actual_model_used
-            ):
-                _use_verified_text_fallback(structured_analysis, requested_law)
         source_chunks = _verify_law_candidates(structured_analysis, registry)
         elapsed = round(time.time() - start_time, 2)
         return AnalysisResponse(
@@ -674,10 +575,6 @@ async def run_analysis_pipeline(
 
     if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or ""):
         _enforce_direct_section_match(structured_analysis, requested_law, registry)
-        if requested_law.code in {"BNS", "BNSS"} and not await _independent_section_verification(
-            requested_law, _direct_section_claims(structured_analysis), actual_model_used
-        ):
-            _use_verified_text_fallback(structured_analysis, requested_law)
     source_chunks = _verify_law_candidates(structured_analysis, registry)
     elapsed = round(time.time() - start_time, 2)
     logger.info(
