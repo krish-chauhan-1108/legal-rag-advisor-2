@@ -340,6 +340,7 @@ class HealthResponse(BaseModel):
 
     status: str = "healthy"
     version: str = "1.0.0"
+    build_id: str = "unknown"
     source_registry_ready: bool = False
     documents_indexed: int = 0
     vector_store_ready: bool = False

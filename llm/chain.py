@@ -36,12 +36,46 @@ from key_manager import (
 from legal_sources.registry import LawSourceRegistry, get_registry
 from llm.prompts import DIRECT_ANALYSIS_PROMPT, SYSTEM_PROMPT
 from models.schemas import AnalysisResponse, SourceChunk, StructuredAnalysis
+from pydantic import BaseModel, Field
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 _llms = {}
 _REPEATED_WORDS = re.compile(r"\b(\w+)(?:\s+\1){2,}\b", re.IGNORECASE)
+_EXPLICIT_LAW_SECTION = re.compile(
+    r"(?<!\w)(?:(BNS|BNSS|BSA)\s*(?:section\s*)?(\d+[A-Za-z]?(?:\(\d+\))?)|"
+    r"(?:section\s*)?(\d+[A-Za-z]?(?:\(\d+\))?)\s+(?:of\s+)?(BNS|BNSS|BSA))(?!\w)",
+    re.IGNORECASE,
+)
+_DIRECT_SECTION_INTENT = re.compile(
+    r"\b(?:explain|describe|meaning\s+of|what\s+is|tell\s+me\s+about)\b",
+    re.IGNORECASE,
+)
+_SECTION_SOURCE_SYSTEM_PROMPT = """\
+You explain one specific Indian statutory provision using the verified source
+record supplied in the user's message. Treat the record as the sole authority
+for the requested provision. The Act code and section number identify one exact
+provision; never replace it with a similarly numbered section from another Act.
+Do not use memory or other Acts to fill gaps in this provision. Explain the
+provided text in plain language, and do not claim anything that the text does
+not support. Return a valid JSON object matching the analysis schema. Put the
+explanation in general_analysis and return the exact requested code and section
+as the only applicable_laws item. Leave quote and exact_text empty; the backend
+will attach the verified source text.
+"""
+_SECTION_VERIFIER_PROMPT = """\
+You are an independent statutory-source auditor. Decide whether every factual
+claim in the proposed explanation is supported by the supplied exact text for
+the exact requested Act and section. The statute text is the only authority.
+Reject claims that are absent, contradict the text, or describe another Act's
+same-numbered section. Return only JSON: {\"supported\": true} or
+{\"supported\": false}. Do not use outside knowledge.
+"""
+
+
+class _SectionVerification(BaseModel):
+    supported: bool = Field(...)
 
 _PROVIDER_BASE_URLS = {
     "groq": "https://api.groq.com/openai/v1",
@@ -286,6 +320,87 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
     raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited or unavailable.")
 
 
+async def _independent_section_verification(record, explanation: str, generation_model: str) -> bool:
+    """Verify an answer with a separately configured provider; fail closed."""
+    try:
+        generation_provider = generation_model.split(":", 2)[1]
+        verifier = next((route for route in _quick_routes()
+                         if route.provider != generation_provider), None)
+        if verifier is None:
+            logger.warning("No independent provider available for direct section verification")
+            return False
+        user_content = (
+            f"REQUESTED ACT: {record.act} ({record.code})\n"
+            f"REQUESTED SECTION: {record.section}\n"
+            f"EXACT STATUTORY TEXT:\n{record.exact_text}\n\n"
+            f"PROPOSED EXPLANATION:\n{explanation}"
+        )
+        messages = [SystemMessage(content=_SECTION_VERIFIER_PROMPT), HumanMessage(content=user_content)]
+        if verifier.provider == "google":
+            llm, _, _ = _get_llm("quick", force_reinit=True, key_record=verifier)
+            structured = llm.with_structured_output(_SectionVerification)
+            result = await asyncio.wait_for(structured.ainvoke(messages), timeout=8.0)
+            if isinstance(result, _SectionVerification):
+                return result.supported
+            if isinstance(result, dict) and type(result.get("supported")) is bool:
+                return result["supported"]
+            return False
+
+        base_url = _provider_url(verifier)
+        payload = {
+            "model": verifier.model,
+            "messages": [
+                {"role": "system", "content": _SECTION_VERIFIER_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            "temperature": 0,
+            "max_tokens": 40,
+            "response_format": {"type": "json_object"},
+        }
+        headers = {"Authorization": f"Bearer {verifier.secret}", "Content-Type": "application/json"}
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
+        if response.status_code >= 400:
+            return False
+        content = response.json().get("choices", [{}])[0].get("message", {}).get("content")
+        decoded = json.loads(content) if isinstance(content, str) else None
+        return isinstance(decoded, dict) and type(decoded.get("supported")) is bool and decoded["supported"]
+    except Exception as exc:
+        logger.warning("Direct section verification failed closed: %s", exc)
+        return False
+
+
+def _direct_section_claims(analysis: StructuredAnalysis) -> str:
+    """Collect all generated user-facing claims for the source auditor."""
+    fields = (
+        ("general_analysis", analysis.general_analysis),
+        ("situation_meaning", analysis.situation_meaning),
+        ("bail_status", analysis.bail_status),
+        ("handling_authority", analysis.handling_authority),
+    )
+    parts = [f"{label}: {value}" for label, value in fields if value]
+    for label in ("next_24_hours", "rights"):
+        values = getattr(analysis, label)
+        if values:
+            parts.append(f"{label}: " + "; ".join(values))
+    for law in analysis.applicable_laws:
+        if law.explanation:
+            parts.append(f"citation explanation: {law.explanation}")
+    return "\n".join(parts)
+
+
+def _use_verified_text_fallback(analysis: StructuredAnalysis, record) -> None:
+    analysis.general_analysis = (
+        "I couldn't verify an explanation against the requested provision. "
+        "Here is the verified statutory text:\n\n" + record.exact_text
+    )
+    analysis.situation_meaning = ""
+    analysis.bail_status = ""
+    analysis.next_24_hours = []
+    analysis.rights = []
+    analysis.handling_authority = ""
+
+
 def _clean_model_text(value: str, max_length: int = 1200) -> str:
     """Remove obvious provider repetition before content reaches the user."""
 
@@ -446,20 +561,32 @@ async def run_analysis_pipeline(
     del document_filter, top_k, user_id, model_preference
     model_preference = "quick"
 
+    start_time = time.time()
+    registry = source_registry if source_registry is not None else get_registry()
+    requested_law = _requested_law_record(query, registry)
     if model_preference == "quick" and is_quick_temporarily_unavailable() and not _quick_routes():
         raise QuickModelUnavailableError(
             "Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited or unavailable."
         )
 
-    start_time = time.time()
-    messages = _build_prompt_messages(query, ephemeral_context, conversation_history)
+    messages = _build_prompt_messages(
+        query,
+        ephemeral_context,
+        conversation_history,
+        requested_law=requested_law,
+    )
 
     if model_preference == "quick":
         structured_analysis, actual_model_used = await _run_quick_provider_pipeline(
             messages,
             time.monotonic() + min(settings.analysis_deadline_seconds, 20.0),
         )
-        registry = source_registry if source_registry is not None else get_registry()
+        if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or ""):
+            _enforce_direct_section_match(structured_analysis, requested_law, registry)
+            if requested_law.code in {"BNS", "BNSS"} and not await _independent_section_verification(
+                requested_law, _direct_section_claims(structured_analysis), actual_model_used
+            ):
+                _use_verified_text_fallback(structured_analysis, requested_law)
         source_chunks = _verify_law_candidates(structured_analysis, registry)
         elapsed = round(time.time() - start_time, 2)
         return AnalysisResponse(
@@ -545,7 +672,12 @@ async def run_analysis_pipeline(
             logger.error("LLM generation failed: %s", exc)
             raise RuntimeError(f"LLM generation failed: {exc}") from exc
 
-    registry = source_registry if source_registry is not None else get_registry()
+    if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or ""):
+        _enforce_direct_section_match(structured_analysis, requested_law, registry)
+        if requested_law.code in {"BNS", "BNSS"} and not await _independent_section_verification(
+            requested_law, _direct_section_claims(structured_analysis), actual_model_used
+        ):
+            _use_verified_text_fallback(structured_analysis, requested_law)
     source_chunks = _verify_law_candidates(structured_analysis, registry)
     elapsed = round(time.time() - start_time, 2)
     logger.info(
@@ -567,13 +699,45 @@ def _build_prompt_messages(
     query: str,
     ephemeral_context: Optional[str],
     conversation_history: Optional[list[dict[str, str]]],
+    requested_law=None,
 ) -> list:
     """Build messages with prior turns before the newest user prompt."""
+
+    if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or ""):
+        # A direct provision lookup is self-contained. Use a narrow system
+        # instruction and omit chat history so a previous mistaken answer
+        # cannot compete with the registry text for the model's attention.
+        return [
+            SystemMessage(content=_SECTION_SOURCE_SYSTEM_PROMPT),
+            HumanMessage(
+                content=(
+                    "Explain the provision requested below in plain language. "
+                    "The verified record is the source of truth.\n\n"
+                    f"USER QUERY:\n{query}\n\n"
+                    f"VERIFIED ACT: {requested_law.act}\n"
+                    f"VERIFIED CODE: {requested_law.code}\n"
+                    f"VERIFIED SECTION: {requested_law.section}\n"
+                    "VERIFIED STATUTORY TEXT:\n"
+                    f"{requested_law.exact_text}"
+                )
+            ),
+        ]
 
     prompt = DIRECT_ANALYSIS_PROMPT.format(
         question=query,
         ephemeral_context=ephemeral_context or "(No uploaded document was provided.)",
     )
+    if requested_law is not None:
+        prompt += (
+            "\n\nEXACT REQUESTED STATUTE FROM THE VERIFIED SOURCE REGISTRY "
+            "(this Act and section are the user's requested subject; do not "
+            "substitute another code's same-numbered section):\n"
+            f"Act/code: {requested_law.act} ({requested_law.code})\n"
+            f"Section: {requested_law.section}\n"
+            f"Text: {requested_law.exact_text}\n"
+            "Explain only this provision. Do not describe another Act's "
+            "section with the same number. Cite this exact Act and section."
+        )
     messages = [SystemMessage(content=SYSTEM_PROMPT)]
     for item in conversation_history or []:
         role = item.get("role")
@@ -586,3 +750,75 @@ def _build_prompt_messages(
             messages.append(HumanMessage(content=content))
     messages.append(HumanMessage(content=prompt))
     return messages
+
+
+def _requested_law_record(query: str, registry: LawSourceRegistry):
+    """Resolve an explicitly named code and section before asking the model."""
+
+    match = _EXPLICIT_LAW_SECTION.search(query or "")
+    if not match:
+        return None
+    if match.group(1):
+        code, section = match.group(1), match.group(2)
+    else:
+        section, code = match.group(3), match.group(4)
+    return registry.lookup(code=code, section=section)
+
+
+def _enforce_direct_section_match(
+    analysis: StructuredAnalysis,
+    record,
+    registry: LawSourceRegistry,
+) -> None:
+    """Keep a mismatched generated section from being presented as verified."""
+
+    from models.schemas import ApplicableLaw
+
+    resolved_candidates = [
+        registry.lookup(
+            law.act,
+            law.section,
+            code=law.code,
+            subsection=law.subsection,
+        )
+        for law in analysis.applicable_laws
+    ]
+    has_matching_citation = any(
+        candidate is not None
+        and (candidate.code, candidate.section) == (record.code, record.section)
+        for candidate in resolved_candidates
+    )
+    has_conflicting_citation = not has_matching_citation or any(
+        candidate is not None
+        and (candidate.code, candidate.section) != (record.code, record.section)
+        for candidate in resolved_candidates
+    )
+
+    if has_conflicting_citation:
+        # Do not silently rewrite (and thereby "verify") a different model
+        # answer as the section the user requested. Fail closed; the verified
+        # statutory text is still attached as a source below.
+        analysis.general_analysis = (
+            "I couldn't reliably match the explanation to the section you "
+            "asked about. Here is the verified statutory text:\n\n" + record.exact_text
+        )
+        analysis.situation_meaning = ""
+        analysis.bail_status = ""
+        analysis.next_24_hours = []
+        analysis.rights = []
+        analysis.handling_authority = ""
+
+    matching_law = next(
+        (
+            law
+            for law, candidate in zip(analysis.applicable_laws, resolved_candidates)
+            if candidate is not None
+            and (candidate.code, candidate.section) == (record.code, record.section)
+        ),
+        None,
+    )
+    analysis.applicable_laws = [
+        matching_law
+        or ApplicableLaw(act=record.act, code=record.code, section=record.section)
+    ]
+    analysis.requires_sources = True

@@ -27,6 +27,7 @@ Usage
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets
 import shutil
 from datetime import datetime, timedelta
@@ -908,6 +909,12 @@ async def health_check() -> HealthResponse:
 
     return HealthResponse(
         status="healthy",
+        build_id=(
+            os.getenv("RENDER_GIT_COMMIT")
+            or os.getenv("GIT_COMMIT")
+            or os.getenv("SOURCE_VERSION")
+            or "unknown"
+        ),
         source_registry_ready=_health_source_registry_ready,
         documents_indexed=0,
         vector_store_ready=False,
@@ -1306,6 +1313,45 @@ async def analyze(
         db.commit()
 
     return response
+
+
+@app.post("/__test/analyze", response_model=AnalysisResponse, include_in_schema=False)
+async def test_analyze(
+    request: AnalysisRequest,
+    x_test_token: str | None = Header(default=None, alias="X-Test-Token"),
+) -> AnalysisResponse:
+    """Temporary, token-gated analysis endpoint for direct backend testing.
+
+    The route is unavailable unless TRANA_TEST_API_TOKEN is configured. It
+    bypasses user sign-in only for this endpoint and never persists chat data.
+    Remove the environment variable to disable it without changing normal auth.
+    """
+
+    configured_token = os.getenv("TRANA_TEST_API_TOKEN", "")
+    if (
+        len(configured_token) < 32
+        or not x_test_token
+        or not secrets.compare_digest(x_test_token, configured_token)
+    ):
+        # Return 404 for both disabled and invalid-token requests so the test
+        # endpoint is not discoverable by unauthenticated probes.
+        raise HTTPException(status_code=404, detail="Not found")
+
+    from llm.chain import run_analysis_pipeline
+
+    try:
+        return await run_analysis_pipeline(
+            query=request.query,
+            document_filter=request.document_filter,
+            top_k=request.top_k,
+            model_preference="quick",
+            ephemeral_context=request.ephemeral_context,
+        )
+    except QuickModelUnavailableError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.error("Test analysis pipeline failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Test analysis failed.") from exc
 
 
 # ═══════════════════════════════════════════════════════════════════════════
