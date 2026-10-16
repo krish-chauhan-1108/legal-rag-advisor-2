@@ -23,10 +23,20 @@ def test_supported_acts_use_official_mha_pdfs() -> None:
 def test_full_supported_act_coverage_is_loaded() -> None:
     registry = get_registry()
 
-    assert len(registry) == 1062
+    assert len(registry) == 1066
     assert registry.lookup("BNS", "358") is not None
     assert registry.lookup("BNSS", "531") is not None
     assert registry.lookup("BSA", "170") is not None
+
+
+def test_central_contract_provisions_resolve_with_jurisdiction_metadata() -> None:
+    registry = get_registry()
+    for section in ("10", "27", "73", "74"):
+        record = registry.lookup("Indian Contract Act, 1872", section)
+        assert record is not None
+        assert record.code == "ICA"
+        assert record.jurisdiction == "India (central law)"
+        assert record.source_url.startswith("https://www.indiacode.nic.in/")
 
 
 def test_registry_validates_and_resolves_subsection() -> None:

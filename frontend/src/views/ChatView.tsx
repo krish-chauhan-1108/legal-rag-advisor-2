@@ -166,8 +166,43 @@ export const ChatView: React.FC = () => {
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pendingChatIdRef = useRef<string | null>(null);
+
+  // Handle clipboard content anywhere inside the open chat. Plain text keeps
+  // native caret insertion when the composer is focused; elsewhere it is
+  // appended to the composer. Clipboard images join the normal upload queue.
+  const handleChatPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const clipboard = event.clipboardData;
+    const images = Array.from(clipboard.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    const text = clipboard.getData('text/plain');
+    const composerFocused = event.target === chatInputRef.current;
+    if (!images.length && composerFocused) return;
+    if (images.length) {
+      event.preventDefault();
+      const namedImages = images.map((file, index) => new File(
+        [file], file.name || `clipboard-image-${Date.now()}-${index + 1}.${file.type.split('/')[1] || 'png'}`,
+        { type: file.type, lastModified: Date.now() },
+      ));
+      setPendingFiles((files) => [...files, ...namedImages]);
+      setAttachmentError('');
+    }
+    if (text && (!composerFocused || images.length > 0)) {
+      event.preventDefault();
+      setInput((current) => {
+        if (!current) return text;
+        if (!composerFocused) return `${current}\n${text}`;
+        const inputElement = chatInputRef.current;
+        const start = inputElement?.selectionStart ?? current.length;
+        const end = inputElement?.selectionEnd ?? start;
+        return `${current.slice(0, start)}${text}${current.slice(end)}`;
+      });
+    }
+  };
 
   useEffect(() => {
     const urls: Record<string, string> = {};
@@ -405,7 +440,7 @@ export const ChatView: React.FC = () => {
   };
 
   return (
-    <div className="chat-view flex flex-col h-full bg-[#F2F0EB] relative">
+    <div className="chat-view flex flex-col h-full bg-[#F2F0EB] relative" onPaste={handleChatPaste}>
       {/* Header */}
       <header className="chat-view__header h-16 border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0 z-10 bg-white/80 backdrop-blur-sm">
         <h2 className="text-lg font-serif tracking-tight text-[#121212]">Legal Analysis</h2>
@@ -498,6 +533,7 @@ export const ChatView: React.FC = () => {
             </button>
             
             <input
+              ref={chatInputRef}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}

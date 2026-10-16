@@ -33,6 +33,7 @@ class LawRecord:
     source_url: str
     source_version: str
     source_hash: str
+    jurisdiction: str = "India"
 
     @property
     def citation(self) -> str:
@@ -51,6 +52,9 @@ def _normalize_code(value: str | None) -> str:
         "bsa": "BSA",
         "bharatiya sakshya adhiniyam": "BSA",
         "bharatiya sakshya adhiniyam, 2023": "BSA",
+        "ica": "ICA",
+        "indian contract act": "ICA",
+        "indian contract act, 1872": "ICA",
     }
     return aliases.get(lowered, value.strip().upper() if value else "")
 
@@ -88,6 +92,7 @@ def _record_from_payload(payload: dict[str, Any]) -> LawRecord:
         source_url=str(payload["source_url"]),
         source_version=str(payload["source_version"]),
         source_hash=source_hash,
+        jurisdiction=str(payload.get("jurisdiction", "India")),
     )
 
 
@@ -108,7 +113,17 @@ class LawSourceRegistry:
         payload = json.loads(source_path.read_text(encoding="utf-8"))
         if payload.get("schema_version") != "1.0":
             raise ValueError(f"Unsupported legal corpus schema: {payload.get('schema_version')}")
-        records = [_record_from_payload(item) for item in payload.get("records", [])]
+        supplemental_path = source_path.with_name("contract_corpus.json")
+        supplemental_records = []
+        if supplemental_path.is_file():
+            supplemental = json.loads(supplemental_path.read_text(encoding="utf-8"))
+            if supplemental.get("schema_version") != "1.0":
+                raise ValueError(f"Unsupported supplemental corpus schema: {supplemental.get('schema_version')}")
+            supplemental_records = supplemental.get("records", [])
+        records = [
+            _record_from_payload(item)
+            for item in [*payload.get("records", []), *supplemental_records]
+        ]
         return cls(records)
 
     def lookup(

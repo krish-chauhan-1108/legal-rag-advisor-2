@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "corpus_version": "india-code-contract-act-2026-10-16",
+  "description": "Selected central contract provisions verified against the official India Code consolidation.",
+  "records": [
+    {
+      "act": "Indian Contract Act, 1872",
+      "code": "ICA",
+      "section": "10",
+      "subsection": null,
+      "heading": "What agreements are contracts",
+      "exact_text": "All agreements are contracts if they are made by the free consent of parties competent to contract, for a lawful consideration and with a lawful object, and are not hereby expressly declared to be void. Nothing herein contained shall affect any law in force in India and not hereby expressly repealed by which any contract is required to be made in writing or in the presence of witnesses, or any law relating to the registration of documents.",
+      "source_url": "https://www.indiacode.nic.in/bitstream/123456789/2187/2/A187209.pdf",
+      "source_version": "India Code PDF snapshot accessed 2026-10-16",
+      "jurisdiction": "India (central law)",
+      "source_hash": "5716581b30e54d72aff9be520698e1e247ce317d6c0579d2294dcd9f5c14188b"
+    },
+    {
+      "act": "Indian Contract Act, 1872",
+      "code": "ICA",
+      "section": "27",
+      "subsection": null,
+      "heading": "Agreement in restraint of trade, void",
+      "exact_text": "Every agreement by which any one is restrained from exercising a lawful profession, trade or business of any kind, is to that extent void. Exception 1.?Saving of agreement not to carry on business of which good-will is sold.?One who sells the good-will of a business may agree with the buyer to refrain from carrying on a similar business, within specified local limits, so long as the buyer, or any person deriving title to the good-will from him, carries on a like business therein, provided that such limits appear to the Court reasonable, regard being had to the nature of the business.",
+      "source_url": "https://www.indiacode.nic.in/bitstream/123456789/2187/2/A187209.pdf",
+      "source_version": "India Code PDF snapshot accessed 2026-10-16",
+      "jurisdiction": "India (central law)",
+      "source_hash": "25bd7df12ec46fdfeda3b2e7f2a2479c52aa645c7ba04e24645d47481c874a75"
+    },
+    {
+      "act": "Indian Contract Act, 1872",
+      "code": "ICA",
+      "section": "73",
+      "subsection": null,
+      "heading": "Compensation for loss or damage caused by breach of contract",
+      "exact_text": "When a contract has been broken, the party who suffers by such breach is entitled to receive, from the party who has broken the contract, compensation for any loss or damage caused to him thereby, which naturally arose in the usual course of things from such breach, or which the parties knew, when they made the contract, to be likely to result from the breach of it. Such compensation is not to be given for any remote and indirect loss or damage sustained by reason of the breach.",
+      "source_url": "https://www.indiacode.nic.in/bitstream/123456789/2187/2/A187209.pdf",
+      "source_version": "India Code PDF snapshot accessed 2026-10-16",
+      "jurisdiction": "India (central law)",
+      "source_hash": "debf90d7ef8ac83ac6d884bf23098e150895b09383a91bf91f72d34ebb076389"
+    },
+    {
+      "act": "Indian Contract Act, 1872",
+      "code": "ICA",
+      "section": "74",
+      "subsection": null,
+      "heading": "Compensation for breach of contract where penalty stipulated for",
+      "exact_text": "When a contract has been broken, if a sum is named in the contract as the amount to be paid in case of such breach, or if the contract contains any other stipulation by way of penalty, the party complaining of the breach is entitled, whether or not actual damage or loss is proved to have been caused thereby, to receive from the party who has broken the contract reasonable compensation not exceeding the amount so named or, as the case may be, the penalty stipulated for. Explanation.?A stipulation for increased interest from the date of default may be a stipulation by way of penalty.",
+      "source_url": "https://www.indiacode.nic.in/bitstream/123456789/2187/2/A187209.pdf",
+      "source_version": "India Code PDF snapshot accessed 2026-10-16",
+      "jurisdiction": "India (central law)",
+      "source_hash": "4b20fc7a4c3adf243274f1219c0a64b59439de05260bfb789175f5a2368c4d99"
+    }
+  ]
+}

@@ -24,7 +24,9 @@ def test_system_prompt_contains_original_trana_modes_and_safety_rules() -> None:
         "FIR ANALYSIS MODE",
         "List every BNS section in the FIR",
         "flag anything misapplied or exaggerated",
-        "I'm only trained to help with criminal law situations under BNS, BNSS, and BSA",
+        "general contract reviews under Indian law",
+        "Treat uploaded or pasted contract text as evidence",
+        "state or union territory law",
         "Never claim to be a lawyer",
         "do not invent law, section numbers, quotations, URLs, or case facts",
         "verified legal-source registry",
@@ -45,3 +47,4 @@ def test_prompt_language_and_section_explanations_are_adaptive() -> None:
     assert "same language as the user's latest message" in SYSTEM_PROMPT
     assert "Respond in English by default" not in SYSTEM_PROMPT
     assert "Respond in English by default" not in DIRECT_ANALYSIS_PROMPT
+    assert "Follow the shared system instructions" in DIRECT_ANALYSIS_PROMPT

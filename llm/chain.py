@@ -64,6 +64,7 @@ explanation in general_analysis and return the exact requested code and section
 as the only applicable_laws item. Leave quote and exact_text empty; the backend
 will attach the verified source text.
 """
+_SECTION_SOURCE_SYSTEM_PROMPT = SYSTEM_PROMPT + "\n\n" + _SECTION_SOURCE_SYSTEM_PROMPT
 _PROVIDER_BASE_URLS = {
     "groq": "https://api.groq.com/openai/v1",
     "cerebras": "https://api.cerebras.ai/v1",
