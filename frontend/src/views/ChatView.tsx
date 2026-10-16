@@ -1,13 +1,36 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
-import { Send, Paperclip, FileText, X, Scale, AlertTriangle } from 'lucide-react';
+import { Send, Paperclip, FileText, Image as ImageIcon, X, Scale, AlertTriangle } from 'lucide-react';
 import { MessageBubble } from '../components/Chat/MessageBubble';
 import type { ApplicableLaw, ChatMessage, ChatSession, StructuredAnalysis } from '../types';
 import { authFetch, authHeaders, notifyApiOnline, useAuth } from '../auth/auth';
 import { API_URL } from '../config';
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
 const WELCOME_MESSAGE = "I'm TRANA\u2014your friendly legal assistant. How can I help you today?";
+
+interface ChatAttachment {
+  id: string;
+  filename: string;
+  content_type: string;
+  size?: number;
+  created_at?: string;
+}
+
+const isImageFile = (file: Pick<File, 'type' | 'name'>): boolean =>
+  file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name);
+
+const readAttachments = (payload: unknown): ChatAttachment[] => {
+  if (!payload || typeof payload !== 'object') return [];
+  const attachments = (payload as { attachments?: unknown }).attachments;
+  if (!Array.isArray(attachments)) return [];
+  return attachments.filter((item): item is ChatAttachment => Boolean(
+    item && typeof item === 'object' &&
+    typeof (item as ChatAttachment).id === 'string' &&
+    typeof (item as ChatAttachment).filename === 'string' &&
+    typeof (item as ChatAttachment).content_type === 'string'
+  ));
+};
 
 const createWelcomeMessage = (): ChatMessage => ({
   role: 'assistant',
@@ -137,9 +160,45 @@ export const ChatView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [quickUnavailable, setQuickUnavailable] = useState(false);
-  const [ephemeralFile, setEphemeralFile] = useState<File | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState('');
+  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
+  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const pendingChatIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const urls: Record<string, string> = {};
+    pendingFiles.forEach((file) => {
+      if (isImageFile(file)) urls[`${file.name}:${file.size}:${file.lastModified}`] = URL.createObjectURL(file);
+    });
+    setPreviewUrls(urls);
+    return () => Object.values(urls).forEach((url) => URL.revokeObjectURL(url));
+  }, [pendingFiles]);
+
+  useEffect(() => {
+    let active = true;
+    if (!routeChatId || !credential) {
+      setChatAttachments([]);
+      return () => { active = false; };
+    }
+    const loadAttachments = async () => {
+      try {
+        const response = await authFetch(`${API_URL}/api/chats/${encodeURIComponent(routeChatId)}/attachments`, credential, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Attachment list failed: ${response.status}`);
+        const payload: unknown = await response.json();
+        if (active) setChatAttachments(readAttachments(payload));
+      } catch (error) {
+        console.error('Failed to load chat attachments', error);
+        if (active) setAttachmentError('Could not load this chat’s attachments. Reload the chat to try again.');
+      }
+    };
+    setAttachmentError('');
+    loadAttachments();
+    return () => { active = false; };
+  }, [credential, routeChatId]);
 
   useEffect(() => {
     let active = true;
@@ -209,41 +268,19 @@ export const ChatView: React.FC = () => {
   }, [messages]);
 
   const handleSend = async () => {
-    if ((!input.trim() && !ephemeralFile) || isLoading || shouldShowChatLoading) return;
+    if ((!input.trim() && pendingFiles.length === 0) || isLoading || shouldShowChatLoading) return;
     if (!credential) {
       navigate('/account');
       return;
     }
 
-    let ephemeralContext = null;
-
     setIsLoading(true);
-
-    if (ephemeralFile) {
-      const formData = new FormData();
-      formData.append('file', ephemeralFile);
-      try {
-        const res = await fetch(`${API_URL}/api/extract`, {
-          method: 'POST',
-          body: formData
-        });
-        if (res.ok) {
-          notifyApiOnline();
-          const data = await res.json();
-          ephemeralContext = data.text;
-        }
-      } catch (e) {
-        console.error("Failed to extract ephemeral doc", e);
-      }
-      setEphemeralFile(null); // clear after sending
-    }
-
     const newMessage: ChatMessage = { role: 'user', content: input, created_at: new Date().toISOString() };
-    setMessages(prev => [...prev, newMessage]);
-    setInput('');
+    setAttachmentError('');
+    let uploadComplete = pendingFiles.length === 0;
 
     try {
-      let activeChatId = routeChatId;
+      let activeChatId = routeChatId ?? pendingChatIdRef.current;
       if (!activeChatId) {
         const createResponse = await authFetch(`${API_URL}/api/chats`, credential, {
           method: 'POST',
@@ -253,15 +290,47 @@ export const ChatView: React.FC = () => {
         if (!createResponse.ok) throw new Error('Could not create a chat session.');
         const createdChat = await createResponse.json() as ChatSession;
         activeChatId = createdChat.id;
+        pendingChatIdRef.current = activeChatId;
         window.dispatchEvent(new CustomEvent('chat-created', { detail: createdChat }));
       }
+
+      if (pendingFiles.length > 0) {
+        setIsUploadingAttachments(true);
+        const formData = new FormData();
+        pendingFiles.forEach((file) => formData.append('files', file, file.name));
+        const uploadResponse = await authFetch(`${API_URL}/api/chats/${encodeURIComponent(activeChatId)}/attachments`, credential, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!uploadResponse.ok) {
+          let detail = 'The files could not be uploaded. Your selected files are still here; please try again.';
+          try {
+            const body = await uploadResponse.json() as { detail?: unknown };
+            if (typeof body.detail === 'string') detail = body.detail;
+          } catch { /* Keep the actionable fallback. */ }
+          throw new Error(detail);
+        }
+        const uploaded: unknown = await uploadResponse.json();
+        const uploadedAttachments = readAttachments(uploaded);
+        if (uploadedAttachments.length !== pendingFiles.length) {
+          throw new Error('The server did not confirm every attachment. Your selected files are still here; please retry.');
+        }
+        setChatAttachments((current) => {
+          const ids = new Set(current.map((attachment) => attachment.id));
+          return [...current, ...uploadedAttachments.filter((attachment) => !ids.has(attachment.id))];
+        });
+        setPendingFiles([]);
+        uploadComplete = true;
+      }
+
+      setMessages(prev => [...prev, newMessage]);
+      setInput('');
 
       const res = await authFetch(`${API_URL}/api/analyze`, credential, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: newMessage.content || "Analyze the attached document.",
-          ephemeral_context: ephemeralContext,
           model_preference: 'quick',
           chat_id: activeChatId,
         })
@@ -288,6 +357,7 @@ export const ChatView: React.FC = () => {
             replace: true,
             state: { preloadedMessages: [...messagesForNavigation, newMessage, assistantMessage] },
           });
+          pendingChatIdRef.current = null;
         }
       } else {
         let detail = 'The backend could not complete the analysis.';
@@ -318,12 +388,18 @@ export const ChatView: React.FC = () => {
           content: `I couldn't complete that analysis. ${detail} Please try again in a moment.`
         }]);
       }
-    } catch {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: 'I couldn\'t reach the analysis service. It may be waking up; please try again in a moment.'
-      }]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'I couldn’t send this message. Please try again.';
+      if (!uploadComplete) {
+        setAttachmentError(message);
+      } else {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'I couldn\'t reach the analysis service. It may be waking up; please try again in a moment.'
+        }]);
+      }
     } finally {
+      setIsUploadingAttachments(false);
       setIsLoading(false);
     }
   };
@@ -366,33 +442,57 @@ export const ChatView: React.FC = () => {
       {/* Input Area */}
       <div className="chat-view__composer p-4 bg-white border-t border-gray-100">
         <div className="max-w-3xl mx-auto">
-          {ephemeralFile && (
-            <div className="chat-view__file-chip mb-3 flex items-center gap-2 bg-[#F9F9F8] border border-gray-200 text-sm py-2 px-3 rounded-md w-max">
-              <FileText className="w-4 h-4 text-blue-500" />
-              <span className="text-gray-700 font-medium truncate max-w-[200px]">{ephemeralFile.name}</span>
-              <button onClick={() => setEphemeralFile(null)} className="text-gray-400 hover:text-gray-600 ml-2">
-                <X className="w-4 h-4" />
-              </button>
+          {(chatAttachments.length > 0 || pendingFiles.length > 0) && (
+            <div className="mb-3 flex flex-wrap gap-2" aria-label="Chat attachments">
+              {chatAttachments.map((attachment) => (
+                <div key={attachment.id} className="flex items-center gap-2 bg-[#F9F9F8] border border-gray-200 text-xs py-1.5 px-2.5 rounded-lg max-w-full" title={`${attachment.filename} (saved in this chat)`}>
+                  {attachment.content_type.startsWith('image/') ? <ImageIcon className="w-4 h-4 text-violet-500 shrink-0" /> : <FileText className="w-4 h-4 text-blue-500 shrink-0" />}
+                  <span className="text-gray-700 font-medium truncate max-w-[180px]">{attachment.filename}</span>
+                  <span className="text-gray-400">Saved</span>
+                </div>
+              ))}
+              {pendingFiles.map((file, index) => {
+                const key = `${file.name}:${file.size}:${file.lastModified}`;
+                const preview = previewUrls[key];
+                return (
+                  <div key={`${key}:${index}`} className="flex items-center gap-2 bg-[#F9F9F8] border border-gray-200 text-xs py-1.5 px-2.5 rounded-lg max-w-full">
+                    {preview ? <img src={preview} alt="" className="w-7 h-7 object-cover rounded" /> : <FileText className="w-4 h-4 text-blue-500 shrink-0" />}
+                    <span className="text-gray-700 font-medium truncate max-w-[180px]">{file.name}</span>
+                    <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setPendingFiles((files) => files.filter((_, i) => i !== index))} disabled={isLoading} className="text-gray-400 hover:text-gray-600 disabled:opacity-40">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
+          {attachmentError && <p role="alert" className="mb-2 text-sm text-red-700">{attachmentError}</p>}
+          {isUploadingAttachments && <p role="status" className="mb-2 text-sm text-gray-500">Saving attachments to this chat…</p>}
           
           <div className="chat-view__input-shell flex items-center gap-3 bg-white border border-gray-300 rounded-xl px-4 py-3 shadow-sm focus-within:ring-2 focus-within:ring-[#1E293B] focus-within:border-transparent transition-all">
             <input 
               type="file"
               ref={fileInputRef}
               onChange={(e) => {
-                if (e.target.files && e.target.files[0]) {
-                  setEphemeralFile(e.target.files[0]);
+                const chosen = Array.from(e.target.files ?? []);
+                if (chosen.length) {
+                  setPendingFiles((files) => {
+                    const existing = new Set(files.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+                    return [...files, ...chosen.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`))];
+                  });
+                  setAttachmentError('');
                 }
+                e.currentTarget.value = '';
               }}
               className="hidden"
-              accept=".pdf,.docx"
+              accept="application/pdf,.pdf,image/*,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif"
+              multiple
             />
             <button
               className="chat-view__attach-button text-gray-400 hover:text-[#1E293B] transition-colors p-1"
               onClick={() => fileInputRef.current?.click()}
               disabled={!user || shouldShowChatLoading}
-              title="Attach document for this query only"
+              title="Attach PDFs or photos to this chat"
             >
               <Paperclip className="w-5 h-5" />
             </button>
@@ -402,7 +502,7 @@ export const ChatView: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={user ? 'Ask a legal question or attach a document for immediate analysis...' : 'Sign in to ask TRANA a question...'}
+              placeholder={user ? 'Ask a legal question or attach PDFs and photos...' : 'Sign in to ask TRANA a question...'}
               disabled={!user || shouldShowChatLoading}
               className="flex-1 bg-transparent border-none focus:ring-0 text-[#121212] placeholder-gray-400 text-sm min-w-0 outline-none"
             />
@@ -410,13 +510,13 @@ export const ChatView: React.FC = () => {
             <button
               className="chat-view__send-button bg-[#1E293B] text-white p-2 rounded-lg hover:bg-[#0F172A] disabled:opacity-50 transition-colors"
               onClick={handleSend}
-              disabled={!user || isLoading || (!input.trim() && !ephemeralFile)}
+              disabled={!user || isLoading || (!input.trim() && pendingFiles.length === 0)}
             >
               <Send className="w-4 h-4" />
             </button>
           </div>
           <p className="text-center text-xs text-gray-400 mt-2">
-            Documents attached here are ephemeral and are not added to TRANA's indexed documents.
+            PDFs and photos are saved with this chat for follow-up questions. They are not added to TRANA’s shared legal library.
           </p>
         </div>
       </div>

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, LargeBinary
 from datetime import datetime
 import uuid
 from database import Base
@@ -48,6 +48,21 @@ class ChatMessage(Base):
     model_used = Column(String, nullable=True)
     processing_time_seconds = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ChatAttachment(Base):
+    """User supplied document retained with its owning chat (database-backed)."""
+
+    __tablename__ = "chat_attachments"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    chat_id = Column(String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    size = Column(Integer, nullable=False)
+    content = Column(LargeBinary, nullable=False)
+    extracted_text = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class GeminiAPIKey(Base):

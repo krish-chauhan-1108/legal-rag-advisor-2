@@ -110,6 +110,18 @@ class ChatSessionSummaryResponse(BaseModel):
     updated_at: str
 
 
+class ChatAttachmentResponse(BaseModel):
+    id: str
+    filename: str
+    content_type: str
+    size: int
+    created_at: str
+
+
+class ChatAttachmentsResponse(BaseModel):
+    attachments: list[ChatAttachmentResponse] = Field(default_factory=list)
+
+
 class GoogleAuthRequest(BaseModel):
     credential: str = Field(..., min_length=20)
 

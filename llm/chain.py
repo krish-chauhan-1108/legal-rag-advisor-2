@@ -8,6 +8,7 @@ then populated only from :mod:`legal_sources.registry`.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
 import time
@@ -271,6 +272,23 @@ async def _invoke_openai_compatible(record, messages, timeout: float | None) -> 
 
 async def _run_quick_provider_pipeline(messages, deadline: float | None):
     routes = _quick_routes()
+    has_media = any(
+        isinstance(message.content, list)
+        and any(isinstance(part, dict) and part.get("type") == "media" for part in message.content)
+        for message in messages
+    )
+    if has_media:
+        # Image and scanned-PDF bytes must reach a model with native vision
+        # input. OpenAI-compatible routes in this application are text-only.
+        routes = [
+            record for record in routes
+            if record.provider == "google" and "gemini" in (record.model or "").lower()
+        ]
+        if not routes:
+            raise RuntimeError(
+                "This chat contains an image or scanned PDF, but no vision-capable Gemini route is configured. "
+                "Configure a Gemini model to analyze visual attachments."
+            )
     if not routes:
         raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because no Quick Thinking providers are configured.")
     attempted = set()
@@ -454,6 +472,7 @@ async def run_analysis_pipeline(
     ephemeral_context: Optional[str] = None,
     conversation_history: Optional[list[dict[str, str]]] = None,
     source_registry: LawSourceRegistry | None = None,
+    media_attachments: Optional[list[dict]] = None,
 ) -> AnalysisResponse:
     """Run direct model analysis and deterministic legal-source verification.
 
@@ -469,6 +488,15 @@ async def run_analysis_pipeline(
     start_time = time.time()
     registry = source_registry if source_registry is not None else get_registry()
     requested_law = _requested_law_record(query, registry)
+    has_media = bool(media_attachments)
+    if has_media and not any(
+        record.provider == "google" and "gemini" in (record.model or "").lower()
+        for record in _quick_routes()
+    ):
+        raise RuntimeError(
+            "This chat contains an image or scanned PDF, but no vision-capable Gemini route is configured. "
+            "Configure a Gemini model to analyze visual attachments."
+        )
     if model_preference == "quick" and is_quick_temporarily_unavailable() and not _quick_routes():
         raise QuickModelUnavailableError(
             "Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited or unavailable."
@@ -479,6 +507,7 @@ async def run_analysis_pipeline(
         ephemeral_context,
         conversation_history,
         requested_law=requested_law,
+        media_attachments=media_attachments,
     )
 
     if model_preference == "quick":
@@ -486,7 +515,7 @@ async def run_analysis_pipeline(
             messages,
             time.monotonic() + min(settings.analysis_deadline_seconds, 20.0),
         )
-        if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or ""):
+        if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or "") and not has_media:
             _enforce_direct_section_match(structured_analysis, requested_law, registry)
         source_chunks = _verify_law_candidates(structured_analysis, registry)
         elapsed = round(time.time() - start_time, 2)
@@ -573,7 +602,7 @@ async def run_analysis_pipeline(
             logger.error("LLM generation failed: %s", exc)
             raise RuntimeError(f"LLM generation failed: {exc}") from exc
 
-    if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or ""):
+    if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or "") and not media_attachments:
         _enforce_direct_section_match(structured_analysis, requested_law, registry)
     source_chunks = _verify_law_candidates(structured_analysis, registry)
     elapsed = round(time.time() - start_time, 2)
@@ -597,10 +626,11 @@ def _build_prompt_messages(
     ephemeral_context: Optional[str],
     conversation_history: Optional[list[dict[str, str]]],
     requested_law=None,
+    media_attachments: Optional[list[dict]] = None,
 ) -> list:
     """Build messages with prior turns before the newest user prompt."""
 
-    if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or ""):
+    if requested_law is not None and _DIRECT_SECTION_INTENT.search(query or "") and not media_attachments:
         # A direct provision lookup is self-contained. Use a narrow system
         # instruction and omit chat history so a previous mistaken answer
         # cannot compete with the registry text for the model's attention.
@@ -645,7 +675,21 @@ def _build_prompt_messages(
             messages.append(AIMessage(content=content))
         elif role == "user":
             messages.append(HumanMessage(content=content))
-    messages.append(HumanMessage(content=prompt))
+    content = prompt
+    if media_attachments:
+        blocks = [{"type": "text", "text": prompt}]
+        for attachment in media_attachments:
+            mime_type = attachment.get("content_type", "")
+            raw = attachment.get("content", b"")
+            if mime_type not in {"image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif", "application/pdf"}:
+                continue
+            blocks.append({
+                "type": "media",
+                "mime_type": mime_type,
+                "data": base64.b64encode(raw).decode("ascii"),
+            })
+        content = blocks
+    messages.append(HumanMessage(content=content))
     return messages
 
 

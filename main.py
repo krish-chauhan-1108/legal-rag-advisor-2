@@ -27,9 +27,11 @@ Usage
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import secrets
 import shutil
+import uuid
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -62,6 +64,7 @@ from models.schemas import (
     ChatSessionResponse,
     ChatSessionSummaryResponse,
     ChatMessageResponse,
+    ChatAttachmentsResponse,
     GoogleAuthRequest,
     GoogleAuthResponse,
     AdminAccessResponse,
@@ -105,6 +108,29 @@ NEW_CHAT_GREETING = "I'm TRANA\u2014your friendly legal assistant. How can I hel
 HISTORY_MAX_MESSAGES = 32
 HISTORY_MESSAGE_CHAR_LIMIT = 3000
 HISTORY_CONTEXT_CHAR_LIMIT = 24_000
+CHAT_ATTACHMENT_MAX_FILES = 10
+CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+CHAT_ATTACHMENT_MAX_TOTAL_BYTES = 12 * 1024 * 1024
+CHAT_ATTACHMENT_TEXT_LIMIT = 50_000
+CHAT_ATTACHMENTS_CONTEXT_LIMIT = 40_000
+
+
+def _extract_chat_attachment(filename: str, content_type: str, content: bytes) -> str:
+    """Extract searchable document text without persisting a local temp file."""
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".pdf" or content_type == "application/pdf":
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(content))
+        page_text = [
+            f"[Page {index}]\n{page.extract_text() or ''}"
+            for index, page in enumerate(reader.pages, start=1)
+        ]
+        return "\n\n".join(page_text)[:CHAT_ATTACHMENT_TEXT_LIMIT]
+    if suffix == ".docx" or content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        from docx import Document
+        document = Document(io.BytesIO(content))
+        return "\n".join(paragraph.text for paragraph in document.paragraphs if paragraph.text.strip())[:CHAT_ATTACHMENT_TEXT_LIMIT]
+    return ""
 
 
 def _clip_history_text(value: object, limit: int = HISTORY_MESSAGE_CHAR_LIMIT) -> str:
@@ -879,9 +905,112 @@ def delete_chat(chat_id: str, user_email: str = Depends(get_current_user_email),
     if not db_session:
         raise HTTPException(status_code=404, detail="Chat not found")
     db.query(db_models.ChatMessage).filter(db_models.ChatMessage.session_id == chat_id).delete()
+    db.query(db_models.ChatAttachment).filter(db_models.ChatAttachment.chat_id == chat_id).delete()
     db.delete(db_session)
     db.commit()
     return {"status": "success"}
+
+
+def _chat_attachment_response(row):
+    return {
+        "id": row.id,
+        "filename": row.filename,
+        "content_type": row.content_type,
+        "size": row.size,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+@app.post("/api/chats/{chat_id}/attachments", response_model=ChatAttachmentsResponse, tags=["Chats"])
+async def upload_chat_attachments(
+    chat_id: str,
+    files: list[UploadFile] = File(...),
+    user_email: str = Depends(get_current_user_email),
+    db: Session = Depends(get_db),
+):
+    """Persist multiple documents against an authenticated chat."""
+    chat = db.query(db_models.ChatSession).filter(
+        db_models.ChatSession.id == chat_id,
+        db_models.ChatSession.user_email == user_email,
+    ).first()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if not files or len(files) > CHAT_ATTACHMENT_MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"Attach between 1 and {CHAT_ATTACHMENT_MAX_FILES} files at a time.")
+
+    existing_rows = db.query(
+        db_models.ChatAttachment.size,
+    ).filter(db_models.ChatAttachment.chat_id == chat_id).all()
+    if len(existing_rows) + len(files) > CHAT_ATTACHMENT_MAX_FILES:
+        raise HTTPException(status_code=413, detail=f"A chat can contain at most {CHAT_ATTACHMENT_MAX_FILES} attachments.")
+    existing_total = sum(row.size for row in existing_rows)
+
+    allowed = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+        ".webp": "image/webp", ".gif": "image/gif",
+        ".heic": "image/heic", ".heif": "image/heif",
+    }
+    new_rows = []
+    for upload in files:
+        name = Path(upload.filename or "").name
+        suffix = Path(name).suffix.lower()
+        expected_type = allowed.get(suffix)
+        if not name or not expected_type:
+            raise HTTPException(status_code=415, detail=f"Unsupported attachment: {name or 'unnamed file'}")
+        if upload.content_type and upload.content_type not in {expected_type, "application/octet-stream"}:
+            raise HTTPException(status_code=415, detail=f"File type does not match {name}.")
+        content = await upload.read(CHAT_ATTACHMENT_MAX_BYTES + 1)
+        if not content or len(content) > CHAT_ATTACHMENT_MAX_BYTES:
+            raise HTTPException(status_code=413, detail=f"{name} is empty or exceeds the 10 MB per-file limit.")
+        existing_total += len(content)
+        if existing_total > CHAT_ATTACHMENT_MAX_TOTAL_BYTES:
+            raise HTTPException(status_code=413, detail="Attachments in this chat may use up to 12 MB in total.")
+        if expected_type == "application/pdf" and not content.startswith(b"%PDF-"):
+            raise HTTPException(status_code=400, detail=f"{name} is not a valid PDF file.")
+        if expected_type == "image/jpeg" and not content.startswith(b"\xff\xd8\xff"):
+            raise HTTPException(status_code=400, detail=f"{name} is not a valid JPEG image.")
+        if expected_type == "image/png" and not content.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise HTTPException(status_code=400, detail=f"{name} is not a valid PNG image.")
+        try:
+            extracted_text = _extract_chat_attachment(name, expected_type, content)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not read {name}: {exc}") from exc
+        new_rows.append(db_models.ChatAttachment(
+            id=str(uuid.uuid4()), chat_id=chat_id, filename=name,
+            content_type=expected_type, size=len(content), content=content,
+            extracted_text=extracted_text,
+        ))
+
+    db.add_all(new_rows)
+    chat.updated_at = datetime.utcnow()
+    db.commit()
+    return {"attachments": [_chat_attachment_response(row) for row in new_rows]}
+
+
+@app.get("/api/chats/{chat_id}/attachments", response_model=ChatAttachmentsResponse, tags=["Chats"])
+def get_chat_attachments(
+    chat_id: str,
+    user_email: str = Depends(get_current_user_email),
+    db: Session = Depends(get_db),
+):
+    chat = db.query(db_models.ChatSession).filter(
+        db_models.ChatSession.id == chat_id,
+        db_models.ChatSession.user_email == user_email,
+    ).first()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    rows = db.query(
+        db_models.ChatAttachment.id,
+        db_models.ChatAttachment.filename,
+        db_models.ChatAttachment.content_type,
+        db_models.ChatAttachment.size,
+        db_models.ChatAttachment.created_at,
+    ).filter(
+        db_models.ChatAttachment.chat_id == chat_id,
+    ).order_by(db_models.ChatAttachment.created_at.asc()).all()
+    return {"attachments": [_chat_attachment_response(row) for row in rows]}
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Health Check
@@ -1224,6 +1353,8 @@ async def analyze(
     from llm.chain import run_analysis_pipeline
     chat_session = None
     conversation_history = []
+    attachment_context = request.ephemeral_context or ""
+    media_attachments = []
     # Save user message to DB if chat_id is provided
     if request.chat_id:
         # Check if chat exists and belongs to the user
@@ -1239,6 +1370,40 @@ async def analyze(
                 db_models.ChatMessage.id.desc(),
             ).limit(HISTORY_MAX_MESSAGES).all()
             conversation_history = _build_conversation_history(prior_messages)
+            attachments = db.query(
+                db_models.ChatAttachment.id,
+                db_models.ChatAttachment.filename,
+                db_models.ChatAttachment.content_type,
+                db_models.ChatAttachment.extracted_text,
+            ).filter(
+                db_models.ChatAttachment.chat_id == chat_session.id,
+            ).order_by(db_models.ChatAttachment.created_at.asc()).all()
+            context_parts = []
+            remaining = CHAT_ATTACHMENTS_CONTEXT_LIMIT
+            for attachment in attachments:
+                if attachment.extracted_text and remaining > 0:
+                    excerpt = attachment.extracted_text[:remaining]
+                    context_parts.append(f"FILE: {attachment.filename}\n{excerpt}")
+                    remaining -= len(excerpt)
+                elif attachment.content_type.startswith("image/"):
+                    context_parts.append(f"FILE: {attachment.filename} (visual attachment; inspect the attached image)")
+                elif attachment.content_type == "application/pdf":
+                    context_parts.append(f"FILE: {attachment.filename} (scanned PDF; inspect the attached pages)")
+                if attachment.content_type.startswith("image/") or (
+                    attachment.content_type == "application/pdf"
+                    and len(attachment.extracted_text.strip()) < 100
+                ):
+                    binary_content = db.query(db_models.ChatAttachment.content).filter(
+                        db_models.ChatAttachment.id == attachment.id,
+                        db_models.ChatAttachment.chat_id == chat_session.id,
+                    ).scalar()
+                    media_attachments.append({
+                        "filename": attachment.filename,
+                        "content_type": attachment.content_type,
+                        "content": binary_content or b"",
+                    })
+            if context_parts:
+                attachment_context = "\n\n".join(part for part in [attachment_context, *context_parts] if part)
             user_msg = db_models.ChatMessage(
                 session_id=request.chat_id,
                 role="user",
@@ -1260,8 +1425,9 @@ async def analyze(
             document_filter=request.document_filter,
             top_k=request.top_k,
             model_preference="quick",
-            ephemeral_context=request.ephemeral_context,
+            ephemeral_context=attachment_context,
             conversation_history=conversation_history,
+            media_attachments=media_attachments,
         )
     except QuickModelUnavailableError as exc:
         logger.warning("Quick Thinking unavailable: %s", exc)
@@ -1274,6 +1440,8 @@ async def analyze(
             },
         )
     except RuntimeError as exc:
+        if "no vision-capable Gemini route" in str(exc):
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if is_quota_error(exc):
             mark_quick_temporarily_unavailable()
             logger.warning("Quick Thinking retrieval quota exhausted: %s", exc)
