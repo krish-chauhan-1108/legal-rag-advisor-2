@@ -316,6 +316,7 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
     if not routes:
         raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because no Quick Thinking providers are configured.")
     attempted = set()
+    empty_analysis_error = None
     for record in routes:
         if record.id in attempted:
             continue
@@ -339,7 +340,11 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
             record_provider_key_attempt(record.id, record.provider, record.model, record.mode, "quota" if quota_error else "failure", exc)
             logger.warning("Quick provider route failed: provider=%s model=%s error=%s", record.provider, record.model, exc)
             if isinstance(exc, EmptyAnalysisError):
-                raise
+                # A vision model can occasionally finish with an empty
+                # structured payload. Treat that as a failed route and try
+                # the next configured Gemini key/model before surfacing it.
+                empty_analysis_error = exc
+                continue
             error_text = str(exc).lower()
             retryable = quota_error or any(marker in error_text for marker in (
                 "http 408", "http 500", "http 502", "http 503", "connection", "temporarily",
@@ -348,6 +353,8 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
                 raise RuntimeError(f"Quick Thinking provider configuration failed: {exc}") from exc
             continue
     mark_quick_temporarily_unavailable()
+    if empty_analysis_error is not None:
+        raise empty_analysis_error
     raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited or unavailable.")
 
 
