@@ -71,6 +71,29 @@ _PROVIDER_BASE_URLS = {
 }
 
 
+class EmptyAnalysisError(RuntimeError):
+    """The provider completed without returning anything the chat can show."""
+
+
+def _require_readable_analysis(analysis: StructuredAnalysis) -> StructuredAnalysis:
+    text_fields = (
+        analysis.conversational_reply,
+        analysis.general_analysis,
+        analysis.situation_meaning,
+        analysis.bail_status,
+        analysis.handling_authority,
+        *(analysis.next_24_hours or []),
+        *(analysis.rights or []),
+    )
+    has_text = any(isinstance(value, str) and value.strip() for value in text_fields)
+    if not has_text:
+        raise EmptyAnalysisError(
+            "The AI model returned an empty analysis. Please try again. If it keeps happening, "
+            "reattach the image or paste the document text into the chat."
+        )
+    return analysis
+
+
 def _model_family(model: str) -> str:
     value = (model or "").lower()
     if "gpt-oss" in value or "gpt_oss" in value:
@@ -260,7 +283,7 @@ async def _invoke_openai_compatible(record, messages, timeout: float | None) -> 
     body = response.json()
     try:
         content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return _parse_structured_analysis_content(content)
+        return _require_readable_analysis(_parse_structured_analysis_content(content))
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         if hasattr(exc, "errors"):
             details = "; ".join(
@@ -304,6 +327,7 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
                 structured = llm.with_structured_output(StructuredAnalysis)
                 response = await asyncio.wait_for(structured.ainvoke(messages), timeout=remaining)
                 analysis = response if isinstance(response, StructuredAnalysis) else StructuredAnalysis.model_validate(response)
+                _require_readable_analysis(analysis)
             else:
                 key_id = record.id
                 analysis = await _invoke_openai_compatible(record, messages, remaining)
@@ -314,6 +338,8 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
             quota_error = is_quota_error(exc) or isinstance(exc, asyncio.TimeoutError)
             record_provider_key_attempt(record.id, record.provider, record.model, record.mode, "quota" if quota_error else "failure", exc)
             logger.warning("Quick provider route failed: provider=%s model=%s error=%s", record.provider, record.model, exc)
+            if isinstance(exc, EmptyAnalysisError):
+                raise
             error_text = str(exc).lower()
             retryable = quota_error or any(marker in error_text for marker in (
                 "http 408", "http 500", "http 502", "http 503", "connection", "temporarily",
@@ -552,6 +578,7 @@ async def run_analysis_pipeline(
                 else StructuredAnalysis.model_validate(response)
             )
             structured_analysis = _sanitize_analysis(structured_analysis)
+            _require_readable_analysis(structured_analysis)
             record_provider_attempt(key_id, actual_model_used, "success")
             if active_model_preference == "quick":
                 clear_quick_temporarily_unavailable()

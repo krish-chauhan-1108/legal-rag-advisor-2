@@ -351,6 +351,7 @@ You must return your response as a valid JSON object matching the requested sche
 
 DIRECT_ANALYSIS_PROMPT = """\
 Follow the shared system instructions and answer the user's Indian criminal-law question or Indian contract-review request directly and practically. General contract review is in scope; unrelated non-criminal requests receive the out-of-scope response from the system instructions.
+When an image or scanned document is attached, inspect it and give the requested analysis in `general_analysis`. If its contents cannot be read, explain that limitation in `general_analysis`; never return an otherwise empty analysis.
 
 This request uses a deterministic legal-source registry, not a local vector
 database. You may identify candidate Acts and sections from your knowledge, but
