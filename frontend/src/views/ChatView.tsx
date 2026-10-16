@@ -8,6 +8,25 @@ import { authFetch, authHeaders, notifyApiOnline, useAuth } from '../auth/auth';
 import { API_URL } from '../config';
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
 const WELCOME_MESSAGE = "I'm TRANA\u2014your friendly legal assistant. How can I help you today?";
+const CHAT_REQUEST_TIMEOUT_MS = 45_000;
+
+const fetchChatRequest = async (
+  input: RequestInfo | URL,
+  credential: string,
+  init: RequestInit,
+  timeoutMessage: string,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), CHAT_REQUEST_TIMEOUT_MS);
+  try {
+    return await authFetch(input, credential, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(timeoutMessage);
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
 
 interface ChatAttachment {
   id: string;
@@ -317,11 +336,11 @@ export const ChatView: React.FC = () => {
     try {
       let activeChatId = routeChatId ?? pendingChatIdRef.current;
       if (!activeChatId) {
-        const createResponse = await authFetch(`${API_URL}/api/chats`, credential, {
+        const createResponse = await fetchChatRequest(`${API_URL}/api/chats`, credential, {
           method: 'POST',
           headers: { ...authHeaders(credential), 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: 'New Chat' }),
-        });
+        }, 'Creating this chat took too long. Please try sending again.');
         if (!createResponse.ok) throw new Error('Could not create a chat session.');
         const createdChat = await createResponse.json() as ChatSession;
         activeChatId = createdChat.id;
@@ -333,10 +352,10 @@ export const ChatView: React.FC = () => {
         setIsUploadingAttachments(true);
         const formData = new FormData();
         pendingFiles.forEach((file) => formData.append('files', file, file.name));
-        const uploadResponse = await authFetch(`${API_URL}/api/chats/${encodeURIComponent(activeChatId)}/attachments`, credential, {
+        const uploadResponse = await fetchChatRequest(`${API_URL}/api/chats/${encodeURIComponent(activeChatId)}/attachments`, credential, {
           method: 'POST',
           body: formData,
-        });
+        }, 'Saving the attachment took too long. It is still selected; please retry.');
         if (!uploadResponse.ok) {
           let detail = 'The files could not be uploaded. Your selected files are still here; please try again.';
           try {
@@ -361,7 +380,7 @@ export const ChatView: React.FC = () => {
       setMessages(prev => [...prev, newMessage]);
       setInput('');
 
-      const res = await authFetch(`${API_URL}/api/analyze`, credential, {
+      const res = await fetchChatRequest(`${API_URL}/api/analyze`, credential, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -369,7 +388,7 @@ export const ChatView: React.FC = () => {
           model_preference: 'quick',
           chat_id: activeChatId,
         })
-      });
+      }, 'Analysis took too long. Please try sending your question again.');
 
       if (res.ok) {
         notifyApiOnline(true);
@@ -430,7 +449,7 @@ export const ChatView: React.FC = () => {
       } else {
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: 'I couldn\'t reach the analysis service. It may be waking up; please try again in a moment.'
+          content: `${message} Your message and saved attachments are still in this chat.`
         }]);
       }
     } finally {
