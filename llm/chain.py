@@ -423,12 +423,34 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
     raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited or unavailable.")
 
 
-def _clean_model_text(value: str, max_length: int = 1200) -> str:
+def _clean_model_text(
+    value: str,
+    max_length: int = 1200,
+    preserve_newlines: bool = False,
+) -> str:
     """Remove obvious provider repetition before content reaches the user."""
 
-    cleaned = re.sub(r"\s+", " ", value or "").strip()
+    if preserve_newlines:
+        lines = (value or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        cleaned = "\n".join(re.sub(r"[ \t]+", " ", line).strip() for line in lines)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    else:
+        cleaned = re.sub(r"\s+", " ", value or "").strip()
     cleaned = _REPEATED_WORDS.sub(r"\1", cleaned)
-    return cleaned[:max_length].rstrip()
+    if len(cleaned) <= max_length:
+        return cleaned
+
+    boundary = max(
+        cleaned.rfind("\n\n", 0, max_length),
+        cleaned.rfind(". ", 0, max_length),
+        cleaned.rfind("! ", 0, max_length),
+        cleaned.rfind("? ", 0, max_length),
+    )
+    if boundary < max_length * 0.75:
+        boundary = cleaned.rfind(" ", 0, max_length)
+    if boundary < 1:
+        boundary = max_length
+    return cleaned[:boundary].rstrip() + "…"
 
 
 def _sanitize_analysis(analysis: StructuredAnalysis) -> StructuredAnalysis:
@@ -443,7 +465,14 @@ def _sanitize_analysis(analysis: StructuredAnalysis) -> StructuredAnalysis:
     ):
         value = getattr(analysis, field_name)
         if isinstance(value, str):
-            setattr(analysis, field_name, _clean_model_text(value))
+            if field_name == "general_analysis":
+                setattr(
+                    analysis,
+                    field_name,
+                    _clean_model_text(value, max_length=6000, preserve_newlines=True),
+                )
+            else:
+                setattr(analysis, field_name, _clean_model_text(value))
 
     for field_name in ("next_24_hours", "rights"):
         cleaned_values = []
