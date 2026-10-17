@@ -660,14 +660,13 @@ def record_provider_key_attempt(
         key = db.query(db_models.ProviderAPIKey).filter(
             db_models.ProviderAPIKey.id == key_id,
             db_models.ProviderAPIKey.provider == provider,
-            db_models.ProviderAPIKey.model == model,
             db_models.ProviderAPIKey.mode == mode,
         ).first()
         if key is None:
             # Legacy Gemini rows are exposed to routing as provider-neutral
             # Google records, but their usage belongs in the legacy table that
             # the admin usage endpoint also aggregates.
-            if provider == "google" and model == "gemini-2.5-flash" and mode == "quick":
+            if provider == "google" and mode == "quick":
                 record_provider_attempt(key_id, model, outcome, error)
             return
         for bucket_type, bucket_start in (("minute", minute_start), ("day", day_start)):

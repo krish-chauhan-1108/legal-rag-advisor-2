@@ -12,6 +12,7 @@ import base64
 import json
 import re
 import time
+from dataclasses import replace
 from typing import Optional
 
 import httpx
@@ -313,15 +314,27 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
                 "This chat contains an image or scanned PDF, but no vision-capable Gemini route is configured. "
                 "Configure a Gemini model to analyze visual attachments."
             )
+        # Gemini API quotas are model-specific. Gemma 4 can also read image
+        # inputs, so try it once with the first configured Google key when a
+        # Gemini route is quota-limited or returns an empty structured result.
+        if (settings.llm_model or "").lower().startswith("gemma-4"):
+            routes.insert(1, replace(routes[0], model=settings.llm_model))
     if not routes:
         raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because no Quick Thinking providers are configured.")
     attempted = set()
     empty_analysis_error = None
+    quota_error_seen = False
     diagnostic_log = []
     for record in routes:
-        if record.id in attempted:
+        route_identity = (record.id, record.model)
+        if route_identity in attempted:
             continue
-        attempted.add(record.id)
+        attempted.add(route_identity)
+        is_gemma_fallback = has_media and record.model == settings.llm_model and (
+            record.model or ""
+        ).lower().startswith("gemma-4")
+        if is_gemma_fallback and not (quota_error_seen or empty_analysis_error):
+            continue
         remaining = max(0.1, (deadline - time.monotonic()) if deadline else 8.0)
         diagnostic_log.append(
             f"route start: provider={record.provider} model={record.model} key_id={record.id}"
@@ -329,7 +342,7 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
         try:
             if record.provider == "google":
                 llm, _, key_id = _get_llm("quick", force_reinit=True, key_record=record)
-                structured = llm.with_structured_output(StructuredAnalysis)
+                structured = None if is_gemma_fallback else llm.with_structured_output(StructuredAnalysis)
                 analysis = None
                 for attempt in range(2):
                     diagnostic_log.append(
@@ -349,13 +362,19 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
                             )),
                         ]
                     remaining = max(0.1, (deadline - time.monotonic()) if deadline else remaining)
-                    response = await asyncio.wait_for(
-                        structured.ainvoke(request_messages), timeout=remaining
-                    )
-                    candidate = (
-                        response if isinstance(response, StructuredAnalysis)
-                        else StructuredAnalysis.model_validate(response)
-                    )
+                    if is_gemma_fallback:
+                        response = await asyncio.wait_for(
+                            llm.ainvoke(request_messages), timeout=remaining
+                        )
+                        candidate = _parse_structured_analysis_content(response.content)
+                    else:
+                        response = await asyncio.wait_for(
+                            structured.ainvoke(request_messages), timeout=remaining
+                        )
+                        candidate = (
+                            response if isinstance(response, StructuredAnalysis)
+                            else StructuredAnalysis.model_validate(response)
+                        )
                     try:
                         analysis = _require_readable_analysis(candidate)
                         break
@@ -380,6 +399,7 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
             return _sanitize_analysis(analysis), f"quick:{record.provider}:{record.model}"
         except Exception as exc:
             quota_error = is_quota_error(exc) or isinstance(exc, asyncio.TimeoutError)
+            quota_error_seen = quota_error_seen or quota_error
             record_provider_key_attempt(record.id, record.provider, record.model, record.mode, "quota" if quota_error else "failure", exc)
             logger.warning("Quick provider route failed: provider=%s model=%s error=%s", record.provider, record.model, exc)
             safe_error = str(exc)

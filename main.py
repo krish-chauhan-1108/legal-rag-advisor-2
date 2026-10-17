@@ -792,7 +792,17 @@ def admin_usage(
     result_rows = []
     for key, legacy in keys:
         provider = getattr(key, "provider", None) or "google"
-        models = [getattr(key, "model", None)] if not legacy else ["gemini-2.5-flash", settings.llm_model]
+        if legacy:
+            models = ["gemini-2.5-flash", settings.llm_model]
+        else:
+            mode = getattr(key, "mode", None) or "quick"
+            models = {getattr(key, "model", None)}
+            models.update(
+                usage.model for usage in usage_rows
+                if usage.provider_key_id == key.id
+                and usage.provider == provider
+                and usage.mode == mode
+            )
         for model in sorted({item for item in models if item}):
             mode = getattr(key, "mode", None) or "quick"
             counts = grouped.get((key.id, provider, model, mode), {
