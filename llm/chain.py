@@ -317,28 +317,78 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
         raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because no Quick Thinking providers are configured.")
     attempted = set()
     empty_analysis_error = None
+    diagnostic_log = []
     for record in routes:
         if record.id in attempted:
             continue
         attempted.add(record.id)
         remaining = max(0.1, (deadline - time.monotonic()) if deadline else 8.0)
+        diagnostic_log.append(
+            f"route start: provider={record.provider} model={record.model} key_id={record.id}"
+        )
         try:
             if record.provider == "google":
                 llm, _, key_id = _get_llm("quick", force_reinit=True, key_record=record)
                 structured = llm.with_structured_output(StructuredAnalysis)
-                response = await asyncio.wait_for(structured.ainvoke(messages), timeout=remaining)
-                analysis = response if isinstance(response, StructuredAnalysis) else StructuredAnalysis.model_validate(response)
-                _require_readable_analysis(analysis)
+                analysis = None
+                for attempt in range(2):
+                    diagnostic_log.append(
+                        f"generation attempt: provider={record.provider} model={record.model} "
+                        f"attempt={attempt + 1}/2"
+                    )
+                    request_messages = messages
+                    if attempt:
+                        request_messages = [
+                            *messages,
+                            HumanMessage(content=(
+                                "Your previous response contained no readable analysis. "
+                                "Analyze the attached document now. Put the complete, useful "
+                                "answer in general_analysis. If text is unclear, say what is "
+                                "unclear and still summarize the readable clauses. Do not return "
+                                "blank fields."
+                            )),
+                        ]
+                    remaining = max(0.1, (deadline - time.monotonic()) if deadline else remaining)
+                    response = await asyncio.wait_for(
+                        structured.ainvoke(request_messages), timeout=remaining
+                    )
+                    candidate = (
+                        response if isinstance(response, StructuredAnalysis)
+                        else StructuredAnalysis.model_validate(response)
+                    )
+                    try:
+                        analysis = _require_readable_analysis(candidate)
+                        break
+                    except EmptyAnalysisError as exc:
+                        empty_analysis_error = exc
+                        diagnostic_log.append(
+                            f"empty structured response: provider={record.provider} "
+                            f"model={record.model} attempt={attempt + 1}/2"
+                        )
+                        if attempt:
+                            raise
+                if analysis is None:
+                    raise EmptyAnalysisError("The model returned no readable analysis.")
             else:
                 key_id = record.id
                 analysis = await _invoke_openai_compatible(record, messages, remaining)
             record_provider_key_attempt(record.id, record.provider, record.model, record.mode, "success")
             clear_quick_temporarily_unavailable()
+            diagnostic_log.append(
+                f"route success: provider={record.provider} model={record.model}"
+            )
             return _sanitize_analysis(analysis), f"quick:{record.provider}:{record.model}"
         except Exception as exc:
             quota_error = is_quota_error(exc) or isinstance(exc, asyncio.TimeoutError)
             record_provider_key_attempt(record.id, record.provider, record.model, record.mode, "quota" if quota_error else "failure", exc)
             logger.warning("Quick provider route failed: provider=%s model=%s error=%s", record.provider, record.model, exc)
+            safe_error = str(exc)
+            if getattr(record, "secret", None):
+                safe_error = safe_error.replace(record.secret, "[REDACTED]")
+            diagnostic_log.append(
+                f"route failure: provider={record.provider} model={record.model} "
+                f"error_type={type(exc).__name__} error={safe_error}"
+            )
             if isinstance(exc, EmptyAnalysisError):
                 # A vision model can occasionally finish with an empty
                 # structured payload. Treat that as a failed route and try
@@ -350,11 +400,26 @@ async def _run_quick_provider_pipeline(messages, deadline: float | None):
                 "http 408", "http 500", "http 502", "http 503", "connection", "temporarily",
             ))
             if not retryable:
-                raise RuntimeError(f"Quick Thinking provider configuration failed: {exc}") from exc
+                if empty_analysis_error is None:
+                    raise RuntimeError(f"Quick Thinking provider configuration failed: {exc}") from exc
+                continue
             continue
-    mark_quick_temporarily_unavailable()
     if empty_analysis_error is not None:
-        raise empty_analysis_error
+        # The request completed, but every vision route returned blank fields.
+        # Return a clear, non-empty answer so clients never render an empty chat
+        # bubble or lose the fact that the image request reached the model.
+        return StructuredAnalysis(
+            general_analysis=(
+                "I received the attached document, but couldn't produce an "
+                "analysis after retrying. Please resend the images or ask about "
+                "a specific clause so I can try a narrower analysis.\n\n"
+                "Temporary diagnostics for this request (credentials and image "
+                "content are excluded):\n```text\n"
+                + "\n".join(diagnostic_log)
+                + "\n```"
+            )
+        ), "quick:vision-empty-response"
+    mark_quick_temporarily_unavailable()
     raise QuickModelUnavailableError("Quick Thinking is temporarily unavailable because all configured Quick Thinking providers are rate-limited or unavailable.")
 
 
