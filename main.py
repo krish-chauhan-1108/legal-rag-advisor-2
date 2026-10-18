@@ -57,6 +57,7 @@ from sqlalchemy import inspect, text
 print("[Progress] Loading schemas...")
 from models.schemas import (
     AnalysisRequest,
+    TemporaryAnalysisRequest,
     AnalysisResponse,
     HealthResponse,
     IngestionResponse,
@@ -1491,6 +1492,39 @@ async def analyze(
         db.commit()
 
     return response
+
+
+@app.post("/api/analyze/temporary", response_model=AnalysisResponse, tags=["Analysis"])
+async def analyze_temporary(request: TemporaryAnalysisRequest) -> AnalysisResponse:
+    """Analyze a guest question without saving it to server-side chat history."""
+    from llm.chain import run_analysis_pipeline
+
+    try:
+        return await run_analysis_pipeline(
+            query=request.query,
+            document_filter=request.document_filter,
+            top_k=request.top_k,
+            model_preference="quick",
+            ephemeral_context=request.ephemeral_context,
+            conversation_history=[message.model_dump() for message in request.conversation_history],
+        )
+    except QuickModelUnavailableError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "QUICK_MODEL_UNAVAILABLE", "message": str(exc), "retry_after_seconds": 300},
+        ) from exc
+    except RuntimeError as exc:
+        if is_quota_error(exc):
+            mark_quick_temporarily_unavailable()
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "QUICK_MODEL_UNAVAILABLE", "message": str(exc), "retry_after_seconds": 300},
+            ) from exc
+        logger.error("Temporary analysis pipeline failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Unexpected temporary analysis error: %s", exc)
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {exc}") from exc
 
 
 @app.post("/__test/analyze", response_model=AnalysisResponse, include_in_schema=False)

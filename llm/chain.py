@@ -803,6 +803,18 @@ def _build_prompt_messages(
         question=query,
         ephemeral_context=ephemeral_context or "(No uploaded document was provided.)",
     )
+    if media_attachments:
+        prompt += (
+            "\n\nATTACHMENT-LED INSTRUCTIONS: The user has supplied image or scanned-document "
+            "attachments as part of this request. Inspect their visible contents before "
+            "classifying the request. If the user says only 'analyze' or gives another short "
+            "instruction, treat it as a request to analyze the attached document; for a "
+            "contract, give a practical Indian contract review in general_analysis. If the "
+            "user asks whether you can see the images, answer from what is actually visible "
+            "and identify the document or readable sections. Do not use the out-of-scope "
+            "response merely because the text prompt is brief. If the attachment is unreadable "
+            "or is not a contract/legal document, explain what you can and cannot identify."
+        )
     if requested_law is not None:
         prompt += (
             "\n\nEXACT REQUESTED STATUTE FROM THE VERIFIED SOURCE REGISTRY "
@@ -826,7 +838,7 @@ def _build_prompt_messages(
             messages.append(HumanMessage(content=content))
     content = prompt
     if media_attachments:
-        blocks = [{"type": "text", "text": prompt}]
+        blocks = []
         for attachment in media_attachments:
             mime_type = attachment.get("content_type", "")
             raw = attachment.get("content", b"")
@@ -837,6 +849,7 @@ def _build_prompt_messages(
                 "mime_type": mime_type,
                 "data": base64.b64encode(raw).decode("ascii"),
             })
+        blocks.append({"type": "text", "text": prompt})
         content = blocks
     messages.append(HumanMessage(content=content))
     return messages

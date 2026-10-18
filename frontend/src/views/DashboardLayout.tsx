@@ -117,6 +117,7 @@ export const DashboardLayout: React.FC = () => {
 
   const handleNewChat = () => {
     setIsMobileNavOpen(false);
+    if (!credential) localStorage.removeItem('trana.temporary-chat');
     if (location.pathname === '/') {
       window.location.reload();
     } else {

@@ -9,6 +9,22 @@ import { API_URL } from '../config';
 const loadingSynonyms = ['Thinking...', 'Analyzing...', 'Reviewing...', 'Almost there...'];
 const WELCOME_MESSAGE = "I'm TRANA\u2014your friendly legal assistant. How can I help you today?";
 const CHAT_REQUEST_TIMEOUT_MS = 45_000;
+const TEMPORARY_CHAT_STORAGE_KEY = 'trana.temporary-chat';
+
+const readTemporaryChat = (): ChatMessage[] => {
+  try {
+    const saved = localStorage.getItem(TEMPORARY_CHAT_STORAGE_KEY);
+    if (!saved) return [createWelcomeMessage()];
+    const messages = JSON.parse(saved) as ChatMessage[];
+    if (!Array.isArray(messages) || messages.length > 100) return [createWelcomeMessage()];
+    return messages.filter((message) =>
+      message && (message.role === 'user' || message.role === 'assistant') &&
+      typeof message.content === 'string' && message.content.length <= 12000
+    );
+  } catch {
+    return [createWelcomeMessage()];
+  }
+};
 
 const fetchChatRequest = async (
   input: RequestInfo | URL,
@@ -167,13 +183,18 @@ const ChatLoadingScreen: React.FC = () => (
 );
 
 export const ChatView: React.FC = () => {
+  const { credential } = useAuth();
+  return <ChatViewContent key={credential ? 'signed-in' : 'guest'} />;
+};
+
+const ChatViewContent: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { id: routeChatId } = useParams<{ id: string }>();
   const { credential, user } = useAuth();
   const preloadedMessages = (location.state as { preloadedMessages?: ChatMessage[] } | null)?.preloadedMessages;
   const [messages, setMessages] = useState<ChatMessage[]>(() => (
-    preloadedMessages ?? (routeChatId ? [] : [createWelcomeMessage()])
+    preloadedMessages ?? (routeChatId ? [] : credential ? [createWelcomeMessage()] : readTemporaryChat())
   ));
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -188,6 +209,16 @@ export const ChatView: React.FC = () => {
   const chatInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pendingChatIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!credential && !routeChatId) {
+      try {
+        localStorage.setItem(TEMPORARY_CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-100)));
+      } catch {
+        console.warn('Could not save the temporary chat in browser storage.');
+      }
+    }
+  }, [credential, messages, routeChatId]);
 
   // Handle clipboard content anywhere inside the open chat. Plain text keeps
   // native caret insertion when the composer is focused; elsewhere it is
@@ -323,8 +354,8 @@ export const ChatView: React.FC = () => {
 
   const handleSend = async () => {
     if ((!input.trim() && pendingFiles.length === 0) || isLoading || shouldShowChatLoading) return;
-    if (!credential) {
-      navigate('/account');
+    if (!credential && pendingFiles.length > 0) {
+      setAttachmentError('Sign in to attach PDFs or photos. Temporary chats support text only.');
       return;
     }
 
@@ -335,7 +366,7 @@ export const ChatView: React.FC = () => {
 
     try {
       let activeChatId = routeChatId ?? pendingChatIdRef.current;
-      if (!activeChatId) {
+      if (credential && !activeChatId) {
         const createResponse = await fetchChatRequest(`${API_URL}/api/chats`, credential, {
           method: 'POST',
           headers: { ...authHeaders(credential), 'Content-Type': 'application/json' },
@@ -348,7 +379,7 @@ export const ChatView: React.FC = () => {
         window.dispatchEvent(new CustomEvent('chat-created', { detail: createdChat }));
       }
 
-      if (pendingFiles.length > 0) {
+      if (credential && pendingFiles.length > 0 && activeChatId) {
         setIsUploadingAttachments(true);
         const formData = new FormData();
         pendingFiles.forEach((file) => formData.append('files', file, file.name));
@@ -380,13 +411,19 @@ export const ChatView: React.FC = () => {
       setMessages(prev => [...prev, newMessage]);
       setInput('');
 
-      const res = await fetchChatRequest(`${API_URL}/api/analyze`, credential, {
+      const priorHistory = messages
+        .filter((message) => message.content !== WELCOME_MESSAGE)
+        .slice(-20)
+        .map(({ role, content }) => ({ role, content: content.slice(-8000) }));
+      const res = await fetchChatRequest(`${API_URL}${credential ? '/api/analyze' : '/api/analyze/temporary'}`, credential ?? '', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: newMessage.content || "Analyze the attached document.",
           model_preference: 'quick',
-          chat_id: activeChatId,
+          ...(credential
+            ? { chat_id: activeChatId }
+            : { conversation_history: priorHistory }),
         })
       }, 'Analysis took too long. Please try sending your question again.');
 
@@ -403,7 +440,7 @@ export const ChatView: React.FC = () => {
           created_at: new Date().toISOString(),
         };
         setMessages(prev => [...prev, assistantMessage]);
-        if (!routeChatId && activeChatId) {
+        if (credential && !routeChatId && activeChatId) {
           const messagesForNavigation = messages.length > 0
             ? messages
             : [createWelcomeMessage()];
@@ -449,7 +486,7 @@ export const ChatView: React.FC = () => {
       } else {
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: `${message} Your message and saved attachments are still in this chat.`
+          content: `${message} Your message${credential ? ' and saved attachments are still in this chat' : ' is still in this temporary chat'}.`
         }]);
       }
     } finally {
@@ -462,7 +499,10 @@ export const ChatView: React.FC = () => {
     <div className="chat-view flex flex-col h-full bg-[#F2F0EB] relative" onPaste={handleChatPaste}>
       {/* Header */}
       <header className="chat-view__header h-16 border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0 z-10 bg-white/80 backdrop-blur-sm">
-        <h2 className="text-lg font-serif tracking-tight text-[#121212]">Legal Analysis</h2>
+        <div>
+          <h2 className="text-lg font-serif tracking-tight text-[#121212]">Legal Analysis</h2>
+          {!credential && <p className="text-xs text-gray-500">Temporary chat · saved in this browser only</p>}
+        </div>
         {quickUnavailable && (
           <div className="chat-view__alert mt-2 flex items-center justify-end gap-1.5 text-xs text-amber-700" role="status">
             <AlertTriangle className="h-3.5 w-3.5" />
@@ -478,12 +518,7 @@ export const ChatView: React.FC = () => {
         ) : messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-gray-400">
             <Scale className="w-12 h-12 mb-4 opacity-20" />
-            <p className="text-sm">{user ? 'Start a new legal inquiry...' : 'Sign in with Google to start chatting.'}</p>
-            {!user && (
-              <button type="button" onClick={() => navigate('/account')} className="mt-4 rounded-lg bg-[#1E293B] px-4 py-2 text-sm text-white hover:bg-[#0F172A]">
-                Open Account
-              </button>
-            )}
+            <p className="text-sm">Start a new legal inquiry...</p>
           </div>
         )}
         {messages.map((msg, idx) => (
@@ -557,15 +592,15 @@ export const ChatView: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={user ? 'Ask a legal question or attach PDFs and photos...' : 'Sign in to ask TRANA a question...'}
-              disabled={!user || shouldShowChatLoading}
+              placeholder={user ? 'Ask a legal question or attach PDFs and photos...' : 'Ask a legal question in a temporary chat...'}
+              disabled={shouldShowChatLoading}
               className="flex-1 bg-transparent border-none focus:ring-0 text-[#121212] placeholder-gray-400 text-sm min-w-0 outline-none"
             />
             
             <button
               className="chat-view__send-button bg-[#1E293B] text-white p-2 rounded-lg hover:bg-[#0F172A] disabled:opacity-50 transition-colors"
               onClick={handleSend}
-              disabled={!user || isLoading || (!input.trim() && pendingFiles.length === 0)}
+              disabled={isLoading || (!input.trim() && pendingFiles.length === 0)}
             >
               <Send className="w-4 h-4" />
             </button>

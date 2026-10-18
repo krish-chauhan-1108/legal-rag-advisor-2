@@ -244,6 +244,17 @@ class AnalysisRequest(BaseModel):
     )
 
 
+class TemporaryConversationMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=8000)
+
+
+class TemporaryAnalysisRequest(AnalysisRequest):
+    """Guest analysis request with bounded, client-held conversation context."""
+
+    conversation_history: list[TemporaryConversationMessage] = Field(default_factory=list, max_length=20)
+
+
 class SourceChunk(BaseModel):
     """A verified legal source or legacy uploaded-document source."""
 

@@ -28,10 +28,6 @@ export const HomePage: React.FC = () => {
     }
   };
 
-  const scrollToSignIn = () => {
-    document.getElementById('sign-in')?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   return (
     <div className="min-h-screen bg-[#F2F0EB] text-[#121212]">
       <header className="sticky top-0 z-20 border-b border-gray-200/80 bg-[#F2F0EB]/90 backdrop-blur">
@@ -103,10 +99,10 @@ export const HomePage: React.FC = () => {
             <div className="mt-9 flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={() => user ? navigate('/') : scrollToSignIn()}
+                onClick={() => navigate('/')}
                 className="inline-flex items-center gap-2 rounded-lg bg-[#1E293B] px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-[#0F172A]"
               >
-                {user ? 'Open your chats' : 'Start with TRANA'}
+                {user ? 'Open your chats' : 'Start a temporary chat'}
                 <ArrowRight className="h-4 w-4" />
               </button>
               <button
